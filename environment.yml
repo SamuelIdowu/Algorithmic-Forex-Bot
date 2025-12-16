@@ -1,0 +1,20 @@
+name: algo_trader
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - numpy
+  - matplotlib
+  - scikit-learn
+  - joblib
+  - ta-lib
+  - pip
+  - pip:
+    - yfinance
+    - backtrader
+    - python-dotenv
+    - ccxt
+    - alpha-vantage
+    - alpaca-trade-api

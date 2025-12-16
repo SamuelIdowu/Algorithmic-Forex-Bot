@@ -1,0 +1,12 @@
+pandas
+numpy
+matplotlib
+yfinance
+backtrader
+python-dotenv
+ccxt
+alpha-vantage
+alpaca-trade-api
+TA-Lib
+scikit-learn
+joblib
