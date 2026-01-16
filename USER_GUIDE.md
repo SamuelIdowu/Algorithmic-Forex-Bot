@@ -28,7 +28,7 @@ python train_model.py --symbol AAPL --start 2020-01-01 --end 2023-01-01
 
 **For Gold (XAU/USD using GC=F):**
 ```bash
-python train_model.py --symbol GC=F --start 2020-01-01 --end 2025-11-29 --model_path models/gold_model.pkl --scaler_path models/gold_scaler.pkl
+python train_model.py --symbol GC=F --start 2020-01-01 --end 2025-12-09 --model_path models/gold_model.pkl --scaler_path models/gold_scaler.pkl
 ```
 
 ### Make a Prediction (Next Candle)

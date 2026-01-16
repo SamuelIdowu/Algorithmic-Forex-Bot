@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -16,9 +16,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: str = "2023-01-01", 
+def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: str = "2025-01-01", 
                 model_path: str = "models/ml_strategy_model.pkl", 
-                scaler_path: str = "models/ml_strategy_scaler.pkl"):
+                scaler_path: str = "models/ml_strategy_scaler.pkl",
+                tune: bool = False):
     """
     Train a machine learning model for predictive trading.
     
@@ -28,6 +29,7 @@ def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: 
         end_date (str): End date in format 'YYYY-MM-DD'
         model_path (str): Path to save the trained model
         scaler_path (str): Path to save the fitted scaler
+        tune (bool): Whether to perform hyperparameter tuning
     """
     logger.info(f"Starting to train model for {symbol}")
     
@@ -66,7 +68,8 @@ def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: 
     logger.info(f"Target distribution:\n{y.value_counts()}")
     
     # Split data into train and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # Use shuffle=False for time series data to prevent look-ahead bias in the test set
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     
     logger.info(f"Training set size: {X_train.shape[0]}, Test set size: {X_test.shape[0]}")
     
@@ -76,18 +79,53 @@ def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: 
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # Initialize and train the model
-    logger.info("Training Random Forest Classifier")
-    model = RandomForestClassifier(
-        n_estimators=100,
-        random_state=42,
-        max_depth=10,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        n_jobs=-1
-    )
+    # Initialize model
+    model = RandomForestClassifier(random_state=42, n_jobs=-1)
     
-    model.fit(X_train_scaled, y_train)
+    if tune:
+        logger.info("Starting hyperparameter tuning with RandomizedSearchCV...")
+        
+        # Define parameter grid
+        param_dist = {
+            'n_estimators': [100, 200, 300, 500],
+            'max_depth': [10, 20, 30, None],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['sqrt', 'log2', None]
+        }
+        
+        # TimeSeriesSplit for cross-validation
+        tscv = TimeSeriesSplit(n_splits=5)
+        
+        random_search = RandomizedSearchCV(
+            estimator=model,
+            param_distributions=param_dist,
+            n_iter=20,
+            cv=tscv,
+            scoring='accuracy',
+            n_jobs=-1,
+            random_state=42,
+            verbose=1
+        )
+        
+        random_search.fit(X_train_scaled, y_train)
+        
+        logger.info(f"Best parameters found: {random_search.best_params_}")
+        logger.info(f"Best CV score: {random_search.best_score_:.4f}")
+        
+        model = random_search.best_estimator_
+    else:
+        # Default parameters
+        logger.info("Using default hyperparameters")
+        model = RandomForestClassifier(
+            n_estimators=100,
+            random_state=42,
+            max_depth=10,
+            min_samples_split=5,
+            min_samples_leaf=2,
+            n_jobs=-1
+        )
+        model.fit(X_train_scaled, y_train)
     
     # Make predictions on test set
     logger.info("Making predictions on test set")
@@ -116,8 +154,8 @@ def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: 
         'importance': model.feature_importances_
     }).sort_values('importance', ascending=False)
     
-    logger.info("Top 10 Most Important Features:")
-    logger.info(feature_importance.head(10))
+    logger.info("Top 15 Most Important Features:")
+    logger.info(feature_importance.head(15))
     
     logger.info(f"Model training completed successfully. Model saved to {model_path}")
     
@@ -180,24 +218,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train ML Strategy Model')
     parser.add_argument('--symbol', type=str, default='AAPL', help='Symbol to train on')
     parser.add_argument('--start', type=str, default='2020-01-01', help='Start date (YYYY-MM-DD)')
-    parser.add_argument('--end', type=str, default='2023-01-01', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, default='2025-01-01', help='End date (YYYY-MM-DD)')
     parser.add_argument('--model_path', type=str, default='models/ml_strategy_model.pkl', help='Path to save model')
     parser.add_argument('--scaler_path', type=str, default='models/ml_strategy_scaler.pkl', help='Path to save scaler')
+    parser.add_argument('--tune', action='store_true', help='Perform hyperparameter tuning')
     
     args = parser.parse_args()
     
     logger.info(f"Starting model training for {args.symbol}")
     
     # Train the model
-    trained_model, trained_scaler, accuracy = train_model(
+    result = train_model(
         symbol=args.symbol,
         start_date=args.start,
         end_date=args.end,
         model_path=args.model_path,
-        scaler_path=args.scaler_path
+        scaler_path=args.scaler_path,
+        tune=args.tune
     )
     
-    if trained_model is not None:
+    if result is not None:
+        trained_model, trained_scaler, accuracy = result
         logger.info(f"Model trained successfully with accuracy: {accuracy:.4f}")
     else:
         logger.error("Model training failed")

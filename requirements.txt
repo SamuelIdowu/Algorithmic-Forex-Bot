@@ -5,7 +5,7 @@ yfinance
 backtrader
 python-dotenv
 ccxt
-alpha-vantage
+alpha-vantage==2.3.1
 alpaca-trade-api
 TA-Lib
 scikit-learn

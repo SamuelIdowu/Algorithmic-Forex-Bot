@@ -78,6 +78,28 @@ def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     df['bb_lower'] = bb_lower
     df['bb_width'] = bb_upper - bb_lower
     df['bb_position'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
+
+    # 11. Stochastic Oscillator
+    stoch_k, stoch_d = calculate_stochastic(df['high'], df['low'], df['close'])
+    df['stoch_k'] = stoch_k
+    df['stoch_d'] = stoch_d
+
+    # 12. Williams %R
+    df['williams_r'] = calculate_williams_r(df['high'], df['low'], df['close'])
+
+    # 13. On-Balance Volume (OBV)
+    df['obv'] = calculate_obv(df['close'], df['volume'])
+
+    # 14. Slope (Linear Regression Slope of Close)
+    df['slope'] = calculate_slope(df['close'], period=10)
+
+    # 15. Lagged Indicators (Context)
+    # Lag RSI, MACD Hist, and Volatility to give the model trend context
+    for lag in [1, 2, 3]:
+        df[f'rsi_lag{lag}'] = df['rsi'].shift(lag)
+        df[f'macd_hist_lag{lag}'] = df['macd_hist'].shift(lag)
+        df[f'volatility_lag{lag}'] = df['volatility'].shift(lag)
+        df[f'obv_lag{lag}'] = df['obv'].shift(lag)
     
     # Clean: Drop NaN values resulting from rolling windows
     initial_rows = len(df)
@@ -171,6 +193,75 @@ def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int
     atr = true_range.rolling(window=period).mean()
 
     return atr
+
+
+def calculate_stochastic(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14, smooth_k: int = 3, smooth_d: int = 3) -> Tuple[pd.Series, pd.Series]:
+    """
+    Calculate Stochastic Oscillator (%K and %D)
+    """
+    # Calculate %K
+    lowest_low = low.rolling(window=period).min()
+    highest_high = high.rolling(window=period).max()
+    
+    k_percent = 100 * ((close - lowest_low) / (highest_high - lowest_low))
+    
+    # Smooth %K
+    k_percent_smooth = k_percent.rolling(window=smooth_k).mean()
+    
+    # Calculate %D (SMA of %K)
+    d_percent = k_percent_smooth.rolling(window=smooth_d).mean()
+    
+    return k_percent_smooth, d_percent
+
+
+def calculate_williams_r(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """
+    Calculate Williams %R
+    """
+    highest_high = high.rolling(window=period).max()
+    lowest_low = low.rolling(window=period).min()
+    
+    williams_r = -100 * ((highest_high - close) / (highest_high - lowest_low))
+    return williams_r
+
+
+def calculate_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """
+    Calculate On-Balance Volume (OBV)
+    """
+    obv = pd.Series(index=close.index, dtype='float64')
+    obv.iloc[0] = volume.iloc[0]
+    
+    # Vectorized calculation
+    change = close.diff()
+    direction = np.where(change > 0, 1, np.where(change < 0, -1, 0))
+    
+    # We need to handle the first element being NaN from diff()
+    direction[0] = 0 
+    
+    # Calculate cumulative sum of signed volume
+    obv = (direction * volume).cumsum()
+    return obv
+
+
+def calculate_slope(series: pd.Series, period: int = 10) -> pd.Series:
+    """
+    Calculate the slope of the linear regression line for a rolling window.
+    """
+    def linear_slope(y):
+        if len(y) < 2:
+            return 0
+        x = np.arange(len(y))
+        # Simple linear regression slope: cov(x, y) / var(x)
+        # Using numpy polyfit is cleaner but slower in rolling apply
+        # Let's use a simplified formula for slope
+        x_mean = (len(y) - 1) / 2
+        y_mean = y.mean()
+        numerator = np.sum((x - x_mean) * (y - y_mean))
+        denominator = np.sum((x - x_mean) ** 2)
+        return numerator / denominator if denominator != 0 else 0
+
+    return series.rolling(window=period).apply(linear_slope, raw=True)
 
 
 def prepare_training_data(df: pd.DataFrame, target_period: int = 1) -> Tuple[pd.DataFrame, pd.Series]:

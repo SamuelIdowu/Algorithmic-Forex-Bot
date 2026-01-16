@@ -1,7 +1,14 @@
 import pandas as pd
 import yfinance as yf
-from alpha_vantage.timeseries import TimeSeries
-from alpha_vantage.foreignexchange import ForeignExchange
+try:
+    from alpha_vantage.timeseries import TimeSeries
+    from alpha_vantage.foreignexchange import ForeignExchange
+    ALPHA_VANTAGE_AVAILABLE = True
+except ImportError:
+    ALPHA_VANTAGE_AVAILABLE = False
+    TimeSeries = None
+    ForeignExchange = None
+
 from utils.config import ALPHA_VANTAGE_API_KEY
 import ccxt
 import os
@@ -19,8 +26,14 @@ class DataProvider:
     """
 
     def __init__(self):
-        self.alpha_vantage = TimeSeries(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
-        self.forex = ForeignExchange(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
+        if ALPHA_VANTAGE_AVAILABLE:
+            self.alpha_vantage = TimeSeries(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
+            self.forex = ForeignExchange(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
+        else:
+            self.alpha_vantage = None
+            self.forex = None
+            logger.warning("Alpha Vantage library not available. Some features may be disabled.")
+            
         self.db_manager = DatabaseManager()
     
     def get_alpha_vantage_data(self, symbol, start_date=None, end_date=None, function='TIME_SERIES_DAILY', outputsize='full'):
@@ -183,32 +196,42 @@ class DataProvider:
         else:
             logger.info(f"Data for {symbol} not in database or outdated, fetching from Yahoo Finance")
 
-        try:
-            data = yf.download(symbol, start=start_date, end=end_date)
-
-            if data.empty:
-                logger.warning(f"No data found for {symbol} from Yahoo Finance")
-                return pd.DataFrame()
-
-            # Ensure the data is in the right format for our database
-            if isinstance(data.columns, pd.MultiIndex):
-                # If it's a MultiIndex, flatten it
-                data.columns = [col[0].lower() if isinstance(col, tuple) else col.lower() for col in data.columns]
-            else:
-                # If it's a regular Index, just convert to lowercase
-                data.columns = [col.lower() for col in data.columns]
-
-            # Save to database
+        import time
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
             try:
-                self.db_manager.save_data(data, symbol)
-                logger.info(f"Saved {symbol} data to database")
-            except Exception as db_error:
-                logger.error(f"Failed to save {symbol} data to database: {db_error}")
+                # Add auto_adjust=True to silence FutureWarning and get adjusted data
+                data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True, progress=False)
 
-            return data
-        except Exception as e:
-            logger.error(f"Error fetching data from Yahoo Finance for {symbol}: {e}")
-            return pd.DataFrame()
+                if data.empty:
+                    logger.warning(f"No data found for {symbol} from Yahoo Finance")
+                    return pd.DataFrame()
+
+                # Ensure the data is in the right format for our database
+                if isinstance(data.columns, pd.MultiIndex):
+                    # If it's a MultiIndex, flatten it
+                    data.columns = [col[0].lower() if isinstance(col, tuple) else col.lower() for col in data.columns]
+                else:
+                    # If it's a regular Index, just convert to lowercase
+                    data.columns = [col.lower() for col in data.columns]
+
+                # Save to database
+                try:
+                    self.db_manager.save_data(data, symbol)
+                    logger.info(f"Saved {symbol} data to database")
+                except Exception as db_error:
+                    logger.error(f"Failed to save {symbol} data to database: {db_error}")
+
+                return data
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"All {max_retries} attempts failed for {symbol}")
+                    return pd.DataFrame()
     
     def get_crypto_data(self, symbol, exchange='binance', timeframe='1d', limit=100):
         """
