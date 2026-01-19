@@ -17,3 +17,5 @@ def test_ticker(symbol):
 print("Checking yfinance version:", yf.__version__)
 test_ticker("euro usd")
 test_ticker("EURUSD=X")
+test_ticker("EUR/USD")
+test_ticker("USDJPY=X")

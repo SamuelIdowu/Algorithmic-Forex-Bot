@@ -80,12 +80,32 @@ def predict_next_movement(symbol, model_path, scaler_path):
     direction = "UP" if prediction == 1 else "DOWN"
     confidence = probabilities[prediction]
     
+    # Calculate Trade Specs
+    entry_price = latest_data['close'].values[0]
+    atr = latest_data['atr'].values[0] if 'atr' in latest_data.columns else 0
+    
+    tp = 0.0
+    sl = 0.0
+    
+    if direction == "UP":
+        tp = entry_price + (2 * atr)
+        sl = entry_price - (1 * atr)
+    else:
+        tp = entry_price - (2 * atr)
+        sl = entry_price + (1 * atr)
+        
+    holding_time = "1 Trading Day" # Estimated based on model target period
+
     result = {
         'symbol': symbol,
         'date': latest_date,
-        'current_price': latest_data['close'].values[0],
+        'current_price': entry_price,
         'prediction': direction,
         'confidence': confidence,
+        'entry': entry_price,
+        'tp': tp,
+        'sl': sl,
+        'holding_time': holding_time,
         'history': data_with_features  # Return historical data with features for visualization
     }
     
@@ -99,9 +119,15 @@ def print_prediction(result):
     print(f"PREDICTION FOR {result['symbol']} (Next Candle)")
     print("="*50)
     print(f"Date: {result['date'].strftime('%Y-%m-%d')}")
-    print(f"Close Price: {result['current_price']:.2f}")
+    print(f"Current Price: {result['current_price']:.5f}")
     print(f"Prediction: {result['prediction']}")
     print(f"Confidence: {result['confidence']:.2%}")
+    print("-" * 50)
+    print("TRADE SPECIFICATIONS (ESTIMATED)")
+    print(f"Entry: {result['entry']:.5f}")
+    print(f"Take Profit (TP): {result['tp']:.5f}")
+    print(f"Stop Loss (SL): {result['sl']:.5f}")
+    print(f"Holding Time: {result['holding_time']}")
     print("="*50 + "\n")
 
 if __name__ == "__main__":

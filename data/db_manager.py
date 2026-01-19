@@ -223,6 +223,28 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting latest timestamp for {symbol}: {e}")
             return None
+
+    def get_earliest_timestamp(self, symbol: str) -> Optional[pd.Timestamp]:
+        """
+        Get the earliest timestamp for a symbol in the database.
+        
+        Args:
+            symbol (str): Symbol of the asset
+            
+        Returns:
+            pd.Timestamp: The earliest timestamp, or None if no data exists
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT MIN(timestamp) FROM market_data WHERE symbol = ?", (symbol,))
+            result = cursor.fetchone()
+            
+            if result and result[0]:
+                return pd.to_datetime(result[0])
+            return None
+        except Exception as e:
+            logger.error(f"Error getting earliest timestamp for {symbol}: {e}")
+            return None
     
     def close_connection(self):
         """Close the database connection."""

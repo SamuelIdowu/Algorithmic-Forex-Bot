@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from typing import Union, Tuple
 import logging
+import talib
+import talib
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -80,23 +82,27 @@ def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     df['bb_position'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
 
     # 11. Stochastic Oscillator
-    stoch_k, stoch_d = calculate_stochastic(df['high'], df['low'], df['close'])
-    df['stoch_k'] = stoch_k
-    df['stoch_d'] = stoch_d
-
+    slowk, slowd = talib.STOCH(df['high'], df['low'], df['close'], 
+                               fastk_period=14, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
+    df['stoch_k'] = slowk
+    df['stoch_d'] = slowd
+    
     # 12. Williams %R
-    df['williams_r'] = calculate_williams_r(df['high'], df['low'], df['close'])
-
+    df['williams_r'] = talib.WILLR(df['high'], df['low'], df['close'], timeperiod=14)
+    
     # 13. On-Balance Volume (OBV)
-    df['obv'] = calculate_obv(df['close'], df['volume'])
-
+    df['obv'] = talib.OBV(df['close'], df['volume'])
+    
     # 14. Slope (Linear Regression Slope of Close)
-    df['slope'] = calculate_slope(df['close'], period=10)
-
-    # 15. Lagged Indicators (Context)
-    # Lag RSI, MACD Hist, and Volatility to give the model trend context
+    df['slope'] = talib.LINEARREG_SLOPE(df['close'], timeperiod=14)
+    
+    # 15. Additional Lagged Features (as expected by model)
+    # ['rsi_lag1', 'macd_hist_lag1', 'volatility_lag1', 'obv_lag1', 'rsi_lag2', 'macd_hist_lag2', 'volatility_lag2', 'obv_lag2', 'rsi_lag3', 'macd_hist_lag3', 'volatility_lag3', 'obv_lag3']
     for lag in [1, 2, 3]:
         df[f'rsi_lag{lag}'] = df['rsi'].shift(lag)
+        df[f'macd_hist_lag{lag}'] = df['macd_hist'].shift(lag)
+        df[f'volatility_lag{lag}'] = df['volatility'].shift(lag)
+        df[f'obv_lag{lag}'] = df['obv'].shift(lag)
         df[f'macd_hist_lag{lag}'] = df['macd_hist'].shift(lag)
         df[f'volatility_lag{lag}'] = df['volatility'].shift(lag)
         df[f'obv_lag{lag}'] = df['obv'].shift(lag)

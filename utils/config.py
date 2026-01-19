@@ -7,6 +7,7 @@ load_dotenv()
 # Trading mode
 MODE = os.getenv("MODE", "backtest")
 STRATEGY = os.getenv("STRATEGY", "moving_average")
+TRADING_SYMBOL = os.getenv("TRADING_SYMBOL", "AAPL")
 
 # Alpaca API credentials
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")

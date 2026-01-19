@@ -171,23 +171,31 @@ class DataProvider:
         # We also need to check if the data is up-to-date if an end_date is specified
         data_exists = self.db_manager.symbol_exists(symbol, start_date)
         latest_timestamp = self.db_manager.get_latest_timestamp(symbol)
+        earliest_timestamp = self.db_manager.get_earliest_timestamp(symbol)
         
         need_fetch = True
         
-        if data_exists and latest_timestamp:
+        if data_exists and latest_timestamp and earliest_timestamp:
             if end_date:
                 end_date_dt = pd.to_datetime(end_date)
-                # If we have data up to or beyond the requested end date, we don't need to fetch
-                if latest_timestamp >= end_date_dt:
+                start_date_dt = pd.to_datetime(start_date)
+                # If we have data covering the requested range
+                if latest_timestamp >= end_date_dt and earliest_timestamp <= start_date_dt:
                     need_fetch = False
                 else:
-                    logger.info(f"Data in DB (latest: {latest_timestamp}) is older than requested end date ({end_date}). Fetching new data.")
+                    logger.info(f"Data in DB ({earliest_timestamp} to {latest_timestamp}) does not cover requested range ({start_date} to {end_date}). Fetching new data.")
             else:
-                # If no end_date specified, and we have data, we might still want to fetch if it's old?
-                # For now, let's assume if no end_date is given, we use what we have if it exists.
-                # Or we could default to "fetch if older than yesterday".
-                # Let's stick to: if end_date is provided, we enforce it.
-                need_fetch = False
+                # If no end_date specified, we assume we want up to now? 
+                # Or just use what we have? 
+                # Existing logic was: need_fetch = False. Let's keep it but maybe check start_date?
+                if start_date:
+                    start_date_dt = pd.to_datetime(start_date)
+                    if earliest_timestamp <= start_date_dt:
+                        need_fetch = False
+                    else:
+                        logger.info(f"Data in DB starts at {earliest_timestamp}, requested start {start_date}. Fetching new data.")
+                else:
+                    need_fetch = False
         
         if not need_fetch:
             logger.info(f"Loading {symbol} data from database")
@@ -200,10 +208,16 @@ class DataProvider:
         max_retries = 3
         retry_delay = 2
         
+        # Sanitize symbol for Yahoo Finance (e.g. EUR/USD -> EURUSD=X)
+        yf_symbol = symbol
+        if '/' in symbol:
+            yf_symbol = symbol.replace('/', '') + '=X'
+            logger.info(f"Converted symbol {symbol} to {yf_symbol} for Yahoo Finance")
+        
         for attempt in range(max_retries):
             try:
                 # Add auto_adjust=True to silence FutureWarning and get adjusted data
-                data = yf.download(symbol, start=start_date, end=end_date, auto_adjust=True, progress=False)
+                data = yf.download(yf_symbol, start=start_date, end=end_date, auto_adjust=True, progress=False)
 
                 if data.empty:
                     logger.warning(f"No data found for {symbol} from Yahoo Finance")

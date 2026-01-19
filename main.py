@@ -1,7 +1,4 @@
 from utils.config import MODE, validate_config
-from backtest.backtest_engine import run_backtest
-from strategies.moving_average import MovingAverageStrategy, RSIStrategy
-from strategies.ml_predictive import MLPredictiveStrategy, MLPredictiveStrategyWithRiskManagement
 import sys
 
 
@@ -18,6 +15,10 @@ def main():
         sys.exit(1)
     
     if MODE == "backtest":
+        from backtest.backtest_engine import run_backtest
+        from strategies.moving_average import MovingAverageStrategy, RSIStrategy
+        from strategies.ml_predictive import MLPredictiveStrategy, MLPredictiveStrategyWithRiskManagement
+        
         print("Running in backtesting mode...")
 
         # Strategy Selection

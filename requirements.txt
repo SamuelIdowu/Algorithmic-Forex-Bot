@@ -10,3 +10,4 @@ alpaca-trade-api
 TA-Lib
 scikit-learn
 joblib
+questionary

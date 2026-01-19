@@ -8,7 +8,7 @@ Ensure you are in the `algo_trader` directory and your environment is active:
 
 ```bash
 cd "algo_trader"
-# If using conda
+
 conda activate algo_trader
 ```
 
@@ -115,10 +115,15 @@ Trade with fake money using real-time market data via Alpaca.
     ```
 
 ### Run Paper Trader
+### Run Paper Trader
 ```bash
+# Default (AAPL)
 MODE=paper python main.py
+
+# Specific Symbol
+TRADING_SYMBOL=SPY MODE=paper python main.py
 ```
-*Note: The current `main.py` runs a simple example for paper trading. You can modify `live_trading/trader.py` to use your ML strategy logic.*
+*Note: The current `main.py` runs the ML strategy for paper trading. Ensure you have trained a model for the symbol you are trading!*
 
 ---
 
@@ -130,5 +135,6 @@ The bot is configured via the `.env` file and environment variables.
 | :--- | :--- | :--- |
 | `MODE` | `backtest`, `paper`, or `live` | `backtest` |
 | `STRATEGY` | Strategy to run in backtest | `moving_average` |
+| `TRADING_SYMBOL` | Symbol to trade in paper/live mode | `AAPL` |
 | `ALPACA_API_KEY` | Alpaca Key ID | - |
 | `ALPACA_API_SECRET` | Alpaca Secret Key | - |
