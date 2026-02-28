@@ -80,13 +80,42 @@ def main():
         elif action == "Predict":
             symbol = get_symbol("Select Symbol to Predict:")
             
-            cmd = [sys.executable, "predict.py", "--symbol", symbol]
+            # Default advanced settings
+            timeframe = "1d"
+            lookback = "100"
+            rr_sl = "2.0" 
+            rr_tp = "3.0"
             
             custom_paths = questionary.confirm("Do you want to specify custom model/scaler paths?", default=False).ask()
+            model_path = "models/ml_strategy_model.pkl"
+            scaler_path = "models/ml_strategy_scaler.pkl"
+            
             if custom_paths:
                 model_path = questionary.text("Model Path:", default=f"models/{symbol.lower().replace('/', '_')}_model.pkl").ask()
                 scaler_path = questionary.text("Scaler Path:", default=f"models/{symbol.lower().replace('/', '_')}_scaler.pkl").ask()
-                cmd.extend(["--model_path", model_path, "--scaler_path", scaler_path])
+
+            # Customize parameters
+            customize = questionary.confirm("Do you want to customize parameters (Timeframe, Risk/Reward)?", default=False).ask()
+            if customize:
+                timeframe = questionary.select(
+                    "Select Timeframe:",
+                    choices=["1d", "1h", "15m", "5m"],
+                    default="1d"
+                ).ask()
+                lookback = questionary.text("Lookback Period (candles):", default="100").ask()
+                rr_sl = questionary.text("Stop Loss ATR Multiplier:", default="2.0").ask()
+                rr_tp = questionary.text("Take Profit ATR Multiplier:", default="3.0").ask()
+
+            cmd = [
+                sys.executable, "predict.py", 
+                "--symbol", symbol,
+                "--model_path", model_path,
+                "--scaler_path", scaler_path,
+                "--interval", timeframe,
+                "--lookback", lookback,
+                "--sl_mult", rr_sl,
+                "--tp_mult", rr_tp
+            ]
             
             run_command(cmd)
 
@@ -101,20 +130,50 @@ def main():
                 ]
             ).ask()
             
-            # Backtest usually runs on AAPL by default in main.py but we can override if main.py supports it via env var or args
-            # Looking at USER_GUIDE, TRADING_SYMBOL env var is used for paper/live, but main.py might use it for backtest too?
-            # Guide says: STRATEGY=ml_predictive MODE=backtest python main.py
-            # It doesn't explicitly say TRADING_SYMBOL works for backtest, but it's likely. 
-            # Let's ask for symbol anyway and set the env var.
-            
             symbol = get_symbol("Select Symbol to Backtest:")
             
+            # Default advanced settings
+            timeframe = "1d"
+            confidence = "0.7"
+            lookback = "100"
+            rr_sl = "2.0" 
+            rr_tp = "3.0"
+
+            # Ask if user wants to customize advanced settings
+            customize = questionary.confirm("Do you want to customize strategy parameters (Timeframe, Confidence, Risk/Reward)?", default=False).ask()
+            
+            if customize:
+                timeframe = questionary.select(
+                    "Select Timeframe:",
+                    choices=["1d", "1h", "15m", "5m"],
+                    default="1d"
+                ).ask()
+                
+                if "ml_predictive" in strategy:
+                    confidence = questionary.text("Confidence Threshold (0.0-1.0):", default="0.7").ask()
+                    lookback = questionary.text("Lookback Period (candles):", default="100").ask()
+                
+                if strategy == "ml_predictive_risk_managed":
+                    rr_sl = questionary.text("Stop Loss ATR Multiplier:", default="2.0").ask()
+                    rr_tp = questionary.text("Take Profit ATR Multiplier:", default="3.0").ask()
+
             env = os.environ.copy()
             env["STRATEGY"] = strategy
             env["MODE"] = "backtest"
             env["TRADING_SYMBOL"] = symbol
+            env["TIMEFRAME"] = timeframe
+            env["CONFIDENCE_THRESHOLD"] = confidence
+            env["LOOKBACK_PERIOD"] = lookback
+            env["RR_SL_MULT"] = rr_sl
+            env["RR_TP_MULT"] = rr_tp
             
-            print(f"\n🚀 Running Backtest with Strategy: {strategy} on {symbol}\n")
+            print(f"\n🚀 Running Backtest with Strategy: {strategy} on {symbol} ({timeframe})\n")
+            if "ml" in strategy:
+                print(f"Confidence: {confidence}, Lookback: {lookback}")
+            if strategy == "ml_predictive_risk_managed":
+                print(f"Risk: {rr_sl}x ATR, Reward: {rr_tp}x ATR")
+            print("")
+
             try:
                 subprocess.run([sys.executable, "main.py"], env=env, check=True)
                 print("\n✅ Done!")

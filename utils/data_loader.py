@@ -162,16 +162,18 @@ class DataProvider:
             logger.error(f"Error fetching forex data for {from_currency}/{to_currency}: {e}")
             return pd.DataFrame()
 
-    def get_yfinance_data(self, symbol, start_date, end_date):
+    def get_yfinance_data(self, symbol, start_date, end_date, interval='1d'):
         """
         Get data from Yahoo Finance with database caching
         """
-        # Check if data exists in database first
+        # Create a DB symbol key that includes interval if not daily, to avoid mixing data
+        db_symbol = symbol if interval == '1d' else f"{symbol}_{interval}"
+        
         # Check if data exists in database first
         # We also need to check if the data is up-to-date if an end_date is specified
-        data_exists = self.db_manager.symbol_exists(symbol, start_date)
-        latest_timestamp = self.db_manager.get_latest_timestamp(symbol)
-        earliest_timestamp = self.db_manager.get_earliest_timestamp(symbol)
+        data_exists = self.db_manager.symbol_exists(db_symbol, start_date)
+        latest_timestamp = self.db_manager.get_latest_timestamp(db_symbol)
+        earliest_timestamp = self.db_manager.get_earliest_timestamp(db_symbol)
         
         need_fetch = True
         
@@ -183,7 +185,7 @@ class DataProvider:
                 if latest_timestamp >= end_date_dt and earliest_timestamp <= start_date_dt:
                     need_fetch = False
                 else:
-                    logger.info(f"Data in DB ({earliest_timestamp} to {latest_timestamp}) does not cover requested range ({start_date} to {end_date}). Fetching new data.")
+                    logger.info(f"Data in DB for {db_symbol} ({earliest_timestamp} to {latest_timestamp}) does not cover requested range ({start_date} to {end_date}). Fetching new data.")
             else:
                 # If no end_date specified, we assume we want up to now? 
                 # Or just use what we have? 
@@ -193,16 +195,16 @@ class DataProvider:
                     if earliest_timestamp <= start_date_dt:
                         need_fetch = False
                     else:
-                        logger.info(f"Data in DB starts at {earliest_timestamp}, requested start {start_date}. Fetching new data.")
+                        logger.info(f"Data in DB for {db_symbol} starts at {earliest_timestamp}, requested start {start_date}. Fetching new data.")
                 else:
                     need_fetch = False
         
         if not need_fetch:
-            logger.info(f"Loading {symbol} data from database")
-            data = self.db_manager.load_data(symbol, start_date, end_date)
+            logger.info(f"Loading {db_symbol} data from database")
+            data = self.db_manager.load_data(db_symbol, start_date, end_date)
             return data
         else:
-            logger.info(f"Data for {symbol} not in database or outdated, fetching from Yahoo Finance")
+            logger.info(f"Data for {db_symbol} not in database or outdated, fetching from Yahoo Finance with interval {interval}")
 
         import time
         max_retries = 3
@@ -217,7 +219,7 @@ class DataProvider:
         for attempt in range(max_retries):
             try:
                 # Add auto_adjust=True to silence FutureWarning and get adjusted data
-                data = yf.download(yf_symbol, start=start_date, end=end_date, auto_adjust=True, progress=False)
+                data = yf.download(yf_symbol, start=start_date, end=end_date, interval=interval, auto_adjust=True, progress=False)
 
                 if data.empty:
                     logger.warning(f"No data found for {symbol} from Yahoo Finance")
@@ -233,10 +235,10 @@ class DataProvider:
 
                 # Save to database
                 try:
-                    self.db_manager.save_data(data, symbol)
-                    logger.info(f"Saved {symbol} data to database")
+                    self.db_manager.save_data(data, db_symbol)
+                    logger.info(f"Saved {db_symbol} data to database")
                 except Exception as db_error:
-                    logger.error(f"Failed to save {symbol} data to database: {db_error}")
+                    logger.error(f"Failed to save {db_symbol} data to database: {db_error}")
 
                 return data
             except Exception as e:
@@ -305,16 +307,25 @@ class DataProvider:
 
 
 
-def get_stock_data(symbol, start_date, end_date, provider='alpha_vantage'):
+def get_stock_data(symbol, start_date, end_date, provider='alpha_vantage', interval='1d'):
     """
     Get stock data from specified provider
     """
     provider_instance = DataProvider()
 
     if provider == 'alpha_vantage':
-        data = provider_instance.get_alpha_vantage_data(symbol, start_date=start_date, end_date=end_date)
+        # Alpha Vantage uses different params for intraday calling get_intraday inside get_alpha_vantage_data
+        # But get_alpha_vantage_data takes 'function' arg
+        function = 'TIME_SERIES_DAILY'
+        if interval != '1d':
+             function = 'TIME_SERIES_INTRADAY'
+             # Note: get_alpha_vantage_data currently hardcodes interval='5min' for intraday
+             # We might need to update that too if we want full flexibility, but for now 
+             # let's focus on yfinance which is the default/preferred provider in other scripts.
+        
+        data = provider_instance.get_alpha_vantage_data(symbol, start_date=start_date, end_date=end_date, function=function)
     elif provider == 'yfinance':
-        data = provider_instance.get_yfinance_data(symbol, start_date, end_date)
+        data = provider_instance.get_yfinance_data(symbol, start_date, end_date, interval=interval)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 

@@ -24,6 +24,13 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 INITIAL_CAPITAL = 10000
 COMMISSION_PER_TRADE = 0.0  # Set to 0 for no commission
 
+# Strategy Settings
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
+RISK_REWARD_SL_MULT = float(os.getenv("RR_SL_MULT", "2.0"))
+RISK_REWARD_TP_MULT = float(os.getenv("RR_TP_MULT", "3.0"))
+TIMEFRAME = os.getenv("TIMEFRAME", "1d")
+LOOKBACK_PERIOD = int(os.getenv("LOOKBACK_PERIOD", "100"))
+
 # Forex settings
 FOREX_TRADING_PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF"]
 

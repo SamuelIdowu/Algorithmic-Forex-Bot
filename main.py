@@ -22,7 +22,7 @@ def main():
         print("Running in backtesting mode...")
 
         # Strategy Selection
-        from utils.config import STRATEGY
+        from utils.config import STRATEGY, CONFIDENCE_THRESHOLD, RISK_REWARD_SL_MULT, RISK_REWARD_TP_MULT, TIMEFRAME, LOOKBACK_PERIOD, TRADING_SYMBOL
         import os
         
         print(f"Selected Strategy: {STRATEGY}")
@@ -42,7 +42,13 @@ def main():
                 print("Please train the model first using: python train_model.py")
                 sys.exit(1)
             strategy_class = MLPredictiveStrategy
-            kwargs = {"start": "2022-01-01", "end": "2023-01-01"}
+            # Pass configuration to strategy
+            kwargs = {
+                "start": "2022-01-01", 
+                "end": "2023-01-01",
+                "confidence_threshold": CONFIDENCE_THRESHOLD,
+                "lookback_period": LOOKBACK_PERIOD
+            }
         elif STRATEGY == "ml_predictive_risk_managed":
              # Check if model exists
             if not os.path.exists("models/ml_strategy_model.pkl"):
@@ -50,16 +56,25 @@ def main():
                 print("Please train the model first using: python train_model.py")
                 sys.exit(1)
             strategy_class = MLPredictiveStrategyWithRiskManagement
-            kwargs = {"start": "2022-01-01", "end": "2023-01-01"}
+            # Pass configuration to strategy
+            kwargs = {
+                "start": "2022-01-01", 
+                "end": "2023-01-01",
+                "confidence_threshold": CONFIDENCE_THRESHOLD,
+                "lookback_period": LOOKBACK_PERIOD,
+                "stop_loss_atr_multiplier": RISK_REWARD_SL_MULT,
+                "take_profit_atr_multiplier": RISK_REWARD_TP_MULT
+            }
         else:
             print(f"Unknown strategy: {STRATEGY}. Defaulting to MovingAverageStrategy")
             strategy_class = MovingAverageStrategy
 
         if strategy_class:
             run_backtest(
-                symbol="AAPL",
+                symbol=TRADING_SYMBOL,
                 strategy_class=strategy_class,
                 initial_cash=10000,
+                interval=TIMEFRAME,
                 **kwargs
             )
 

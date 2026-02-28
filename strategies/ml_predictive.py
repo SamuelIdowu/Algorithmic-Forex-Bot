@@ -19,6 +19,8 @@ class MLPredictiveStrategy(bt.Strategy):
     params = dict(
         model_path="models/ml_strategy_model.pkl",
         scaler_path="models/ml_strategy_scaler.pkl",
+        confidence_threshold=0.7,  # Increased default confidence
+        lookback_period=100,       # Increased lookback for better indicator stability
         printlog=False
     )
 
@@ -58,18 +60,27 @@ class MLPredictiveStrategy(bt.Strategy):
         # Build a DataFrame with the current data to calculate features
         # For this, we need at least enough historical data for feature calculation
         # We'll check if we have enough data points
-        if len(self) < 50:  # Need at least 50 data points to have meaningful features
+        lookback = self.params.lookback_period
+        if len(self) < lookback: 
             return
         
         # Create a DataFrame with the most recent data to calculate features
         # We'll build it with enough history to calculate all features properly
-        df = pd.DataFrame({
-            'open': [self.datas[0].open[i] for i in range(-49, 1)],  # 50 data points
-            'high': [self.datas[0].high[i] for i in range(-49, 1)],
-            'low': [self.datas[0].low[i] for i in range(-49, 1)],
-            'close': [self.datas[0].close[i] for i in range(-49, 1)],
-            'volume': [self.datas[0].volume[i] for i in range(-49, 1)]
-        })
+        # range is inclusive of start, exclusive of stop
+        # to get N items ending at current (0), we need range(-N+1, 1)
+        # e.g., if lookback=50, range(-49, 1) gives -49...0 (50 items)
+        
+        start_idx = -(lookback - 1)
+        
+        data_slice = {
+            'open': [self.datas[0].open[i] for i in range(start_idx, 1)], 
+            'high': [self.datas[0].high[i] for i in range(start_idx, 1)],
+            'low': [self.datas[0].low[i] for i in range(start_idx, 1)],
+            'close': [self.datas[0].close[i] for i in range(start_idx, 1)],
+            'volume': [self.datas[0].volume[i] for i in range(start_idx, 1)]
+        }
+        
+        df = pd.DataFrame(data_slice)
         
         # Convert index to a temporary datetime-like format
         df.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df))
@@ -115,7 +126,7 @@ class MLPredictiveStrategy(bt.Strategy):
             # Check if we are in the market
             if not self.position:
                 # Not yet ... we MIGHT BUY if ...
-                if prediction == 1 and confidence > 0.6:  # Buy signal with confidence threshold
+                if prediction == 1 and confidence > self.params.confidence_threshold:  # Buy signal with confidence threshold
                     self.log(f'BUY CREATE, Close: {self.data_close[0]:.2f}, Confidence: {confidence:.2f}')
                     self.buy_price = self.data_close[0]
                     self.buy_date = self.datas[0].datetime.date(0)
@@ -125,7 +136,7 @@ class MLPredictiveStrategy(bt.Strategy):
 
             else:
                 # Already in the market ... we might sell
-                if prediction == 0 and confidence > 0.6:  # Sell signal with confidence threshold
+                if prediction == 0 and confidence > self.params.confidence_threshold:  # Sell signal with confidence threshold
                     self.log(f'SELL CREATE, Close: {self.data_close[0]:.2f}, Confidence: {confidence:.2f}')
                     
                     # Keep track of the created order to avoid a 2nd order
@@ -174,8 +185,10 @@ class MLPredictiveStrategyWithRiskManagement(MLPredictiveStrategy):
     params = dict(
         model_path="models/ml_strategy_model.pkl",
         scaler_path="models/ml_strategy_scaler.pkl",
-        stop_loss_pct=0.02,  # 2% stop loss
-        take_profit_pct=0.04,  # 4% take profit
+        confidence_threshold=0.7, # Increased default
+        lookback_period=100,      # Increased default
+        stop_loss_atr_multiplier=2.0,   # Editable Risk setting
+        take_profit_atr_multiplier=3.0, # Editable Reward setting
         atr_period=14,
         printlog=False
     )
@@ -220,17 +233,21 @@ class MLPredictiveStrategyWithRiskManagement(MLPredictiveStrategy):
 
         # Call parent's next method for signal generation
         # Build a DataFrame with the current data to calculate features
-        if len(self) < 50:  # Need at least 50 data points to have meaningful features
+        lookback = self.params.lookback_period
+        if len(self) < lookback: 
             return
         
-        # Create a DataFrame with the most recent data to calculate features
-        df = pd.DataFrame({
-            'open': [self.datas[0].open[i] for i in range(-49, 1)],  # 50 data points
-            'high': [self.datas[0].high[i] for i in range(-49, 1)],
-            'low': [self.datas[0].low[i] for i in range(-49, 1)],
-            'close': [self.datas[0].close[i] for i in range(-49, 1)],
-            'volume': [self.datas[0].volume[i] for i in range(-49, 1)]
-        })
+        start_idx = -(lookback - 1)
+
+        data_slice = {
+            'open': [self.datas[0].open[i] for i in range(start_idx, 1)], 
+            'high': [self.datas[0].high[i] for i in range(start_idx, 1)],
+            'low': [self.datas[0].low[i] for i in range(start_idx, 1)],
+            'close': [self.datas[0].close[i] for i in range(start_idx, 1)],
+            'volume': [self.datas[0].volume[i] for i in range(start_idx, 1)]
+        }
+        
+        df = pd.DataFrame(data_slice)
         
         # Convert index to a temporary datetime-like format
         df.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df))
@@ -277,7 +294,7 @@ class MLPredictiveStrategyWithRiskManagement(MLPredictiveStrategy):
             # Check if we are in the market
             if not self.position:
                 # Not yet ... we MIGHT BUY if ...
-                if prediction == 1 and confidence > 0.6:  # Buy signal with confidence threshold
+                if prediction == 1 and confidence > self.params.confidence_threshold:  # Buy signal with confidence threshold
                     self.log(f'BUY CREATE, Close: {self.data_close[0]:.2f}, Confidence: {confidence:.2f}')
                     
                     # Record entry price for risk management
@@ -285,8 +302,8 @@ class MLPredictiveStrategyWithRiskManagement(MLPredictiveStrategy):
                     
                     # Calculate stop loss and take profit prices based on ATR
                     current_atr = self.atr[0]
-                    self.stop_price = self.entry_price - (2 * current_atr)
-                    self.target_price = self.entry_price + (3 * current_atr)
+                    self.stop_price = self.entry_price - (self.params.stop_loss_atr_multiplier * current_atr)
+                    self.target_price = self.entry_price + (self.params.take_profit_atr_multiplier * current_atr)
                     
                     self.buy_date = self.datas[0].datetime.date(0)
                     
@@ -295,7 +312,7 @@ class MLPredictiveStrategyWithRiskManagement(MLPredictiveStrategy):
 
             else:
                 # Already in the market ... we might sell
-                if prediction == 0 and confidence > 0.6:  # Sell signal with confidence threshold
+                if prediction == 0 and confidence > self.params.confidence_threshold:  # Sell signal with confidence threshold
                     self.log(f'SELL CREATE, Close: {self.data_close[0]:.2f}, Confidence: {confidence:.2f}')
                     
                     # Close position and reset risk management flags

@@ -11,10 +11,14 @@ from train_model import load_model
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def predict_next_movement(symbol, model_path, scaler_path):
+def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     """
     Predict the next movement for a symbol using the trained model.
     """
+    # Extract kwargs
+    lookback = kwargs.get('lookback', 100)
+    interval = kwargs.get('interval', '1d')
+    
     # Load model and scaler
     model, scaler = load_model(model_path, scaler_path)
     if model is None or scaler is None:
@@ -26,10 +30,18 @@ def predict_next_movement(symbol, model_path, scaler_path):
     # Fetching last 100 days to be safe
     # Set end_date to tomorrow to ensure we get the latest data (including today if available)
     end_date = (pd.Timestamp.now() + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-    start_date = (pd.Timestamp.now() - pd.Timedelta(days=200)).strftime('%Y-%m-%d')
     
-    logger.info(f"Fetching recent data for {symbol}...")
-    data = get_stock_data(symbol, start_date, end_date, provider='yfinance')
+    # Adjust start date based on interval and lookback
+    if interval == '1d':
+        days_back = lookback * 2 # Buffer
+    else:
+        # Approximate for intraday
+        days_back = 59 # Default to 59 days buffer (limit is strictly < 60d for intraday data)
+        
+    start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_back)).strftime('%Y-%m-%d')
+    
+    logger.info(f"Fetching recent data for {symbol} (Interval: {interval})...")
+    data = get_stock_data(symbol, start_date, end_date, provider='yfinance', interval=interval)
     
     if data.empty:
         logger.error("No data found")
@@ -87,14 +99,18 @@ def predict_next_movement(symbol, model_path, scaler_path):
     tp = 0.0
     sl = 0.0
     
+    # Prioritize kwargs, then args, then default
+    tp_mult = kwargs.get('tp_mult', getattr(args, 'tp_mult', 3.0) if 'args' in globals() else 3.0)
+    sl_mult = kwargs.get('sl_mult', getattr(args, 'sl_mult', 2.0) if 'args' in globals() else 2.0)
+    
     if direction == "UP":
-        tp = entry_price + (2 * atr)
-        sl = entry_price - (1 * atr)
+        tp = entry_price + (tp_mult * atr)
+        sl = entry_price - (sl_mult * atr)
     else:
-        tp = entry_price - (2 * atr)
-        sl = entry_price + (1 * atr)
+        tp = entry_price - (tp_mult * atr)
+        sl = entry_price + (sl_mult * atr)
         
-    holding_time = "1 Trading Day" # Estimated based on model target period
+    holding_time = "1 Candle" # Generic based on interval
 
     result = {
         'symbol': symbol,
@@ -106,7 +122,9 @@ def predict_next_movement(symbol, model_path, scaler_path):
         'tp': tp,
         'sl': sl,
         'holding_time': holding_time,
-        'history': data_with_features  # Return historical data with features for visualization
+        'history': data_with_features,
+        'tp_mult': tp_mult,
+        'sl_mult': sl_mult
     }
     
     return result
@@ -118,15 +136,15 @@ def print_prediction(result):
     print("\n" + "="*50)
     print(f"PREDICTION FOR {result['symbol']} (Next Candle)")
     print("="*50)
-    print(f"Date: {result['date'].strftime('%Y-%m-%d')}")
+    print(f"Date: {result['date']}")
     print(f"Current Price: {result['current_price']:.5f}")
     print(f"Prediction: {result['prediction']}")
     print(f"Confidence: {result['confidence']:.2%}")
     print("-" * 50)
     print("TRADE SPECIFICATIONS (ESTIMATED)")
     print(f"Entry: {result['entry']:.5f}")
-    print(f"Take Profit (TP): {result['tp']:.5f}")
-    print(f"Stop Loss (SL): {result['sl']:.5f}")
+    print(f"Take Profit (TP): {result['tp']:.5f} ({result['tp_mult']}x ATR)")
+    print(f"Stop Loss (SL): {result['sl']:.5f} ({result['sl_mult']}x ATR)")
     print(f"Holding Time: {result['holding_time']}")
     print("="*50 + "\n")
 
@@ -135,8 +153,17 @@ if __name__ == "__main__":
     parser.add_argument('--symbol', type=str, default='GC=F', help='Symbol to predict (e.g., GC=F for Gold)')
     parser.add_argument('--model_path', type=str, default='models/ml_strategy_model.pkl', help='Path to trained model')
     parser.add_argument('--scaler_path', type=str, default='models/ml_strategy_scaler.pkl', help='Path to scaler')
+    parser.add_argument('--lookback', type=int, default=100, help='Lookback period in days/candles')
+    parser.add_argument('--interval', type=str, default='1d', help='Data interval (1d, 1h, etc.)')
+    parser.add_argument('--sl_mult', type=float, default=2.0, help='Stop Loss ATR Multiplier')
+    parser.add_argument('--tp_mult', type=float, default=3.0, help='Take Profit ATR Multiplier')
     
     args = parser.parse_args()
     
-    result = predict_next_movement(args.symbol, args.model_path, args.scaler_path)
+    # We need to pass args to predict_next_movement so it can use them
+    # Refactoring signature or attaching to function
+    # Let's change signature to accept **kwargs
+    result = predict_next_movement(args.symbol, args.model_path, args.scaler_path, 
+                                 lookback=args.lookback, interval=args.interval, 
+                                 sl_mult=args.sl_mult, tp_mult=args.tp_mult)
     print_prediction(result)

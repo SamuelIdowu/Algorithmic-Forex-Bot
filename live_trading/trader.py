@@ -80,17 +80,57 @@ class AlpacaTrader:
 
     def get_latest_price(self, symbol):
         """
-        Get the latest price for a symbol
+        Get the latest price for a symbol, supporting Stocks, Crypto, and some Forex via fallbacks
         """
+        # Try Stock Bars (US Equity)
         try:
-            # Use v2 API get_bars
             bars = self.api.get_bars(symbol, TimeFrame.Minute, limit=1)
             if bars:
-                return bars[-1].c  # Close price of the last bar
-            return None
+                return bars[-1].c
         except Exception as e:
-            logger.error(f"Error getting latest price for {symbol}: {e}")
-            return None
+            logger.debug(f"get_bars failed for {symbol}: {e}")
+
+        # Try Latest Trade (Works for Stocks and sometimes Crypto)
+        try:
+            if hasattr(self.api, 'get_latest_trade'):
+                trade = self.api.get_latest_trade(symbol)
+                # handle both object with .price and dict
+                price = getattr(trade, 'price', None) or (trade.get('p') if hasattr(trade, 'get') else None)
+                if price:
+                    logger.info(f"Got price via get_latest_trade for {symbol}: {price}")
+                    return float(price)
+        except Exception as e:
+            logger.debug(f"get_latest_trade failed for {symbol}: {e}")
+
+        # Try Crypto Bars
+        try:
+            if hasattr(self.api, 'get_crypto_bars'):
+                # Note: get_crypto_bars might return different structure depending on valid exchanges
+                bars = self.api.get_crypto_bars(symbol, TimeFrame.Minute, limit=1)
+                if bars:
+                     # Crypto bars often have .close not .c
+                     last_bar = bars[-1]
+                     price = getattr(last_bar, 'close', None) or getattr(last_bar, 'c', None)
+                     if price:
+                         logger.info(f"Got price via get_crypto_bars for {symbol}: {price}")
+                         return float(price)
+        except Exception as e:
+             logger.debug(f"get_crypto_bars failed for {symbol}: {e}")
+             
+        # Try Crypto Quotes (Last resort)
+        try:
+            if hasattr(self.api, 'get_latest_crypto_quote'):
+                quote = self.api.get_latest_crypto_quote(symbol, exchange='CBSE') # try coinbase
+                if quote:
+                    price = getattr(quote, 'ask_price', None) or getattr(quote, 'ap', None)
+                    if price:
+                        logger.info(f"Got price via get_latest_crypto_quote for {symbol}: {price}")
+                        return float(price)
+        except Exception:
+            pass
+
+        logger.error(f"Error getting latest price for {symbol}: All methods failed")
+        return None
 
     def cancel_order(self, order_id):
         """
@@ -149,14 +189,32 @@ class AlpacaTrader:
 
         while True:
             try:
-                # Check if it's market hours
+                # Check if it's market hours (Only for US Equities)
+                should_check_market_hours = True
+                try:
+                    asset = self.api.get_asset(symbol)
+                    # Check if asset class is 'us_equity'
+                    asset_class = getattr(asset, 'class_', None) or (asset._raw.get('class') if hasattr(asset, '_raw') else None)
+                    
+                    if asset_class and asset_class != 'us_equity':
+                        should_check_market_hours = False
+                        logger.info(f"Asset class is {asset_class}, skipping market hours check.")
+                except Exception as e:
+                    # If we can't get the asset, fall back to symbol heuristics
+                    if '/' in symbol: 
+                         should_check_market_hours = False
+                         logger.info(f"Symbol {symbol} appears to be Crypto/Forex, skipping market hours check.")
+                    else:
+                        logger.warning(f"Could not check asset class for {symbol}: {e}")
+
                 clock = self.api.get_clock()
-                if not clock.is_open:
-                    logger.info("Market is closed. Waiting...")
-                    # Wait until market opens
-                    time_to_open = (clock.next_open - clock.timestamp).total_seconds()
-                    time.sleep(time_to_open)
-                    continue
+                if should_check_market_hours:
+                    if not clock.is_open:
+                        logger.info("Market is closed. Waiting...")
+                        # Wait until market opens
+                        time_to_open = (clock.next_open - clock.timestamp).total_seconds()
+                        time.sleep(time_to_open)
+                        continue
 
                 # Check if we've started a new trading day
                 current_day = clock.timestamp.date()

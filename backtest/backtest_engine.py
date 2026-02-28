@@ -5,7 +5,7 @@ from strategies.moving_average import MovingAverageStrategy, RSIStrategy
 import matplotlib.pyplot as plt
 
 
-def run_backtest(symbol="AAPL", strategy_class=MovingAverageStrategy, start=None, end=None, initial_cash=10000, asset_type="stock", interval="1d"):
+def run_backtest(symbol="AAPL", strategy_class=MovingAverageStrategy, start=None, end=None, initial_cash=10000, asset_type="stock", interval="1d", **kwargs):
     """
     Run a backtest with the specified strategy and data
     """
@@ -86,7 +86,7 @@ def run_backtest(symbol="AAPL", strategy_class=MovingAverageStrategy, start=None
     cerebro = bt.Cerebro()
 
     # Add strategy
-    cerebro.addstrategy(strategy_class)
+    cerebro.addstrategy(strategy_class, **kwargs)
 
     # Create a data feed from the downloaded data
     # Note: We feed the buffered data so indicators can calculate.
