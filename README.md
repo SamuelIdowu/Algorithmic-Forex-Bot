@@ -166,7 +166,6 @@ run_backtest(
 
 - Add more sophisticated strategies
 - Implement risk management features
-- Create a dashboard for real-time monitoring
 - Add support for cryptocurrency trading with CCXT
 - Implement advanced technical indicators
 

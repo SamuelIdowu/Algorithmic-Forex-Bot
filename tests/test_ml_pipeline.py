@@ -31,7 +31,7 @@ class TestMLPipeline(unittest.TestCase):
         if os.path.exists(self.scaler_path):
             os.remove(self.scaler_path)
 
-    @patch('train_model.get_stock_data')
+    @patch('train_model.get_yfinance_data')
     def test_train_model(self, mock_get_data):
         mock_get_data.return_value = self.df
         
@@ -49,7 +49,7 @@ class TestMLPipeline(unittest.TestCase):
         self.assertTrue(os.path.exists(self.model_path))
         self.assertTrue(os.path.exists(self.scaler_path))
 
-    @patch('train_model.get_stock_data')
+    @patch('train_model.get_yfinance_data')
     def test_strategy_execution(self, mock_get_data):
         # 1. Train the model first
         mock_get_data.return_value = self.df

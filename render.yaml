@@ -1,0 +1,36 @@
+services:
+  - type: worker
+    name: algo-bot
+    env: docker
+    dockerfilePath: Dockerfile
+    region: oregon
+    plan: starter # Change to 'free' if using a web service with a port, but workers are usually paid or $7/mo.
+    envVars:
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: AGENT_MODE
+        value: paper
+      - key: AGENT_SYMBOLS
+        value: BTC-USD,EURUSD=X,GC=F
+      - key: AGENT_INTERVAL_MINUTES
+        value: "60"
+      - key: TELEGRAM_ENABLED
+        value: "True"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+    disk:
+      name: algo-data
+      mountPath: /app/data
+      sizeGB: 1

@@ -3,13 +3,59 @@ import pandas as pd
 import numpy as np
 import joblib
 import logging
-from utils.data_loader import get_stock_data
+from utils.data_loader import get_yfinance_data
 from utils.features import add_technical_features
 from train_model import load_model
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def _resolve_model_path(symbol: str, model_path: str, scaler_path: str, interval: str):
+    """
+    Try to find the actual .pkl files when the explicit path doesn't exist.
+
+    Resolution order:
+      1. Explicit path (as given)
+      2. Interval-suffixed  e.g. eth-usd_15m_model.pkl  (for intraday)
+      3. Auto-derived daily e.g. eth-usd_model.pkl
+      4. Generic fallback   ml_strategy_model.pkl
+    """
+    import os
+    if os.path.exists(model_path) and os.path.exists(scaler_path):
+        return model_path, scaler_path
+
+    safe_sym = symbol.lower().replace("/", "_").replace("=", "_")
+    models_dir = os.path.dirname(model_path) or "models"
+
+    candidates = []
+    # Intraday-suffixed variant
+    if interval and interval != "1d":
+        candidates.append((
+            os.path.join(models_dir, f"{safe_sym}_{interval}_model.pkl"),
+            os.path.join(models_dir, f"{safe_sym}_{interval}_scaler.pkl"),
+        ))
+    # Plain daily variant
+    candidates.append((
+        os.path.join(models_dir, f"{safe_sym}_model.pkl"),
+        os.path.join(models_dir, f"{safe_sym}_scaler.pkl"),
+    ))
+    # Generic fallback
+    candidates.append((
+        os.path.join(models_dir, "ml_strategy_model.pkl"),
+        os.path.join(models_dir, "ml_strategy_scaler.pkl"),
+    ))
+
+    for mp, sp in candidates:
+        if os.path.exists(mp) and os.path.exists(sp):
+            logger.warning(
+                f"[predict] '{model_path}' not found — using '{mp}' instead."
+            )
+            return mp, sp
+
+    # Nothing found — return originals so load_model gives a clear error
+    return model_path, scaler_path
+
 
 def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     """
@@ -18,12 +64,16 @@ def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     # Extract kwargs
     lookback = kwargs.get('lookback', 100)
     interval = kwargs.get('interval', '1d')
-    
+
+    # Resolve paths — handle interval-suffix mismatch automatically
+    model_path, scaler_path = _resolve_model_path(symbol, model_path, scaler_path, interval)
+
     # Load model and scaler
     model, scaler = load_model(model_path, scaler_path)
     if model is None or scaler is None:
         logger.error("Failed to load model or scaler")
         return
+
 
     # Fetch recent data (enough to calculate features)
     # We need at least 50 days for features like SMA, RSI, etc.
@@ -41,7 +91,7 @@ def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     start_date = (pd.Timestamp.now() - pd.Timedelta(days=days_back)).strftime('%Y-%m-%d')
     
     logger.info(f"Fetching recent data for {symbol} (Interval: {interval})...")
-    data = get_stock_data(symbol, start_date, end_date, provider='yfinance', interval=interval)
+    data = get_yfinance_data(symbol, start_date, end_date, interval=interval)
     
     if data.empty:
         logger.error("No data found")
@@ -129,24 +179,97 @@ def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     
     return result
 
+# ANSI colours (no extra deps)
+_RST  = "\033[0m"
+_BOLD = "\033[1m"
+_GRN  = "\033[92m"
+_RED  = "\033[91m"
+_YEL  = "\033[93m"
+_CYN  = "\033[96m"
+_DIM  = "\033[2m"
+_W    = 54   # inner width
+
+
+def _conf_bar(conf: float, width: int = 12) -> str:
+    filled = round(conf * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def _pct(base: float, target: float) -> str:
+    if not base:
+        return "N/A"
+    p = (target - base) / base * 100
+    return f"{'+' if p >= 0 else ''}{p:.2f}%"
+
+
+def _rr(entry: float, sl: float, tp: float) -> str:
+    risk   = abs(entry - sl)
+    reward = abs(tp - entry)
+    return f"1 : {reward/risk:.2f}" if risk else "N/A"
+
+
+def _fmt(price: float) -> str:
+    return f"{price:.5f}" if price < 10 else f"{price:,.2f}"
+
+
 def print_prediction(result):
     if not result:
         return
 
-    print("\n" + "="*50)
-    print(f"PREDICTION FOR {result['symbol']} (Next Candle)")
-    print("="*50)
-    print(f"Date: {result['date']}")
-    print(f"Current Price: {result['current_price']:.5f}")
-    print(f"Prediction: {result['prediction']}")
-    print(f"Confidence: {result['confidence']:.2%}")
-    print("-" * 50)
-    print("TRADE SPECIFICATIONS (ESTIMATED)")
-    print(f"Entry: {result['entry']:.5f}")
-    print(f"Take Profit (TP): {result['tp']:.5f} ({result['tp_mult']}x ATR)")
-    print(f"Stop Loss (SL): {result['sl']:.5f} ({result['sl_mult']}x ATR)")
-    print(f"Holding Time: {result['holding_time']}")
-    print("="*50 + "\n")
+    direction = result['prediction']   # "UP" or "DOWN"
+    conf      = result['confidence']
+    entry     = result['entry']
+    tp        = result['tp']
+    sl        = result['sl']
+
+    dir_colour = _GRN if direction == "UP" else _RED
+    signal_lbl = "📈 LONG / BUY" if direction == "UP" else "📉 SHORT / SELL"
+    bar        = _conf_bar(conf)
+    tp_pct     = _pct(entry, tp)
+    sl_pct     = _pct(entry, sl)
+    rr_str     = _rr(entry, sl, tp)
+
+    W = _W
+    top = f"╔{'═'*(W+2)}╗"
+    bot = f"╚{'═'*(W+2)}╝"
+    div_eq = f"╠{'═'*(W+2)}╣"
+    div_da = f"╠{'─'*(W+2)}╣"
+
+    def row(text):
+        import re
+        visible_len = len(re.sub(r'\033\[[0-9;]*m', '', text))
+        pad = W - visible_len
+        return f"║  {text}{' ' * max(pad, 0)}║"
+
+    lines = [
+        "",
+        top,
+        row(f"{_BOLD}{_CYN}  PREDICTION: {result['symbol']}  ·  Next Candle{_RST}"),
+        div_eq,
+        row(f"  Date         │ {result['date']}"),
+        row(f"  Current Price │ {_fmt(result['current_price'])}"),
+        div_da,
+        row(f"  Signal        │ {dir_colour}{_BOLD}{signal_lbl}{_RST}"),
+        row(f"  Confidence    │ {bar}  {conf:.1%}"),
+        div_da,
+        row("  TRADE SPECIFICS (estimations based on ATR)"),
+        row(f"  Entry          │ {_fmt(entry)}"),
+        row(f"  Take Profit    │ {_fmt(tp)}  ({_GRN}{tp_pct}{_RST})  " +
+            f"[{result['tp_mult']}× ATR]"),
+        row(f"  Stop Loss      │ {_fmt(sl)}  ({_RED}{sl_pct}{_RST})  " +
+            f"[{result['sl_mult']}× ATR]"),
+        row(f"  Risk : Reward  │ {rr_str}"),
+        row(f"  Holding Time   │ {result['holding_time']}"),
+    ]
+
+    if conf < 0.60:
+        lines.append(div_da)
+        lines.append(row(
+            f"  ⚠️  {_YEL}LOW CONFIDENCE — treat as indicative only{_RST}"
+        ))
+
+    lines += [bot, ""]
+    print("\n".join(lines))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Predict next market movement')

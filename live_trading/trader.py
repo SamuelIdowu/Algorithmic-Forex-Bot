@@ -1,6 +1,10 @@
 import alpaca_trade_api as tradeapi
-from alpaca_trade_api.rest import TimeFrame
+try:
+    from alpaca_trade_api import TimeFrame  # newer versions (>=2.x)
+except ImportError:
+    from alpaca_trade_api.rest import TimeFrame  # older versions
 from utils.config import ALPACA_API_KEY, ALPACA_API_SECRET, ALPACA_BASE_URL, MODE, TRADING_SYMBOL
+from utils.telegram_utils import send_telegram_message_sync
 import pandas as pd
 import time
 import logging
@@ -27,6 +31,7 @@ class AlpacaTrader:
                 base_url=ALPACA_BASE_URL
             )
             logger.info("Alpaca API connection established")
+            send_telegram_message_sync(f"✅ <b>Alpaca API Connected</b>\nMode: {MODE}\nBase URL: {ALPACA_BASE_URL}")
         except Exception as e:
             logger.error(f"Failed to connect to Alpaca API: {e}")
             raise
@@ -73,6 +78,13 @@ class AlpacaTrader:
                 time_in_force=time_in_force
             )
             logger.info(f"Order submitted: {order.side} {order.qty} of {order.symbol}")
+            send_telegram_message_sync(
+                f"📝 <b>Order Placed</b>\n"
+                f"Symbol: {order.symbol}\n"
+                f"Side: {order.side.upper()}\n"
+                f"Qty: {order.qty}\n"
+                f"Type: {order.type}"
+            )
             return order
         except Exception as e:
             logger.error(f"Error placing order: {e}")
@@ -129,7 +141,9 @@ class AlpacaTrader:
         except Exception:
             pass
 
-        logger.error(f"Error getting latest price for {symbol}: All methods failed")
+        msg = f"❌ <b>Error</b>: Failed to get latest price for {symbol} after multiple attempts."
+        logger.error(msg.strip())
+        send_telegram_message_sync(msg)
         return None
 
     def cancel_order(self, order_id):
@@ -368,8 +382,12 @@ def ml_trading_strategy(trader, symbol, current_price):
         
         # 5. Generate Signal
         if prediction == 1 and confidence > 0.6:
+            msg = f"🚀 <b>ML Buy Signal</b> for {symbol}\nConfidence: {confidence:.2%}"
+            send_telegram_message_sync(msg)
             return {'side': 'buy', 'reason': f'ML Buy Signal (Conf: {confidence:.2f})'}
         elif prediction == 0 and confidence > 0.6:
+            msg = f"📉 <b>ML Sell Signal</b> for {symbol}\nConfidence: {confidence:.2%}"
+            send_telegram_message_sync(msg)
             return {'side': 'sell', 'reason': f'ML Sell Signal (Conf: {confidence:.2f})'}
             
         return None

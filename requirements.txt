@@ -11,3 +11,13 @@ TA-Lib
 scikit-learn
 joblib
 questionary
+
+# ── AI Hedge Fund additions ────────────────────────────────────────────────────
+schedule          # Autonomous loop scheduling
+vaderSentiment    # Offline NLP sentiment (no API key needed)
+groq              # Optional: Groq LLM sentiment (set SENTIMENT_ENGINE=groq)
+requests          # News headline fetching
+
+# ── Future (Layer 3 RL — uncomment when ready) ────────────────────────────────
+# stable-baselines3
+# gymnasium

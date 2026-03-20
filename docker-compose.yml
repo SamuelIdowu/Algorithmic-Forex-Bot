@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # The AI Hedge Fund Agent Loop
+  # This runs the background cycles for trading
+  agent:
+    build: .
+    restart: always
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: python run_agent.py
+
+  # The Telegram Bot Interaction Layer
+  # This allows you to control the bot via mobile
+  telegram:
+    build: .
+    restart: always
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: python telegram_bot.py
+    depends_on:
+      - agent
+
+volumes:
+  data:
+  models:

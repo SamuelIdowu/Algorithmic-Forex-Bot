@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import os
 import logging
-from utils.data_loader import get_stock_data
+from utils.data_loader import get_yfinance_data
 from utils.features import add_technical_features, prepare_training_data
 from data.db_manager import DatabaseManager
 
@@ -16,29 +16,60 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def train_model(symbol: str = "AAPL", start_date: str = "2020-01-01", end_date: str = "2025-01-01", 
-                model_path: str = "models/ml_strategy_model.pkl", 
-                scaler_path: str = "models/ml_strategy_scaler.pkl",
-                tune: bool = False):
+def train_model(
+        symbol: str = "AAPL",
+        start_date: str = "2020-01-01",
+        end_date: str = "2025-01-01",
+        model_path: str = None,
+        scaler_path: str = None,
+        tune: bool = False,
+        interval: str = "1d",
+):
     """
-    Train a machine learning model for predictive trading.
-    
+    Train a RandomForest model for a given symbol and candle interval.
+
     Args:
-        symbol (str): Stock symbol to train on
-        start_date (str): Start date in format 'YYYY-MM-DD'
-        end_date (str): End date in format 'YYYY-MM-DD'
-        model_path (str): Path to save the trained model
-        scaler_path (str): Path to save the fitted scaler
-        tune (bool): Whether to perform hyperparameter tuning
+        symbol:     Yahoo Finance ticker (e.g. "BTC-USD").
+        start_date: Training window start "YYYY-MM-DD".
+        end_date:   Training window end   "YYYY-MM-DD".
+        model_path: Where to save the .pkl (auto-named if None).
+        scaler_path:Where to save the scaler .pkl (auto-named if None).
+        tune:       Run RandomizedSearchCV hyperparameter tuning.
+        interval:   Candle size: "1d" (default), "1h", "30m", "15m", "5m".
     """
-    logger.info(f"Starting to train model for {symbol}")
-    
+    # ── Auto-name model files to include the interval ─────────────────────
+    safe_sym = symbol.lower().replace("/", "_").replace("=", "_").replace("-", "-")
+    tf_suffix = f"_{interval}" if interval != "1d" else ""
+    if model_path is None:
+        model_path  = f"models/{safe_sym}{tf_suffix}_model.pkl"
+    if scaler_path is None:
+        scaler_path = f"models/{safe_sym}{tf_suffix}_scaler.pkl"
+
+    logger.info(f"Training {symbol} on {interval} candles → {model_path}")
+
     # Create models directory if it doesn't exist
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    
-    # Load data using the database manager and data loader
+
+    # ── Warn about Yahoo Finance history limits for intraday ──────────────
+    _INTRADAY = {"1m", "2m", "5m", "15m", "30m", "60m", "90m"}
+    if interval in _INTRADAY:
+        from datetime import datetime, timedelta
+        _max_days = 59  # Yahoo Finance allows up to ~60 days; stay 1 day inside the limit
+        _cutoff = (datetime.utcnow() - timedelta(days=_max_days)).strftime("%Y-%m-%d")
+        if start_date < _cutoff:
+            logger.warning(
+                f"Yahoo Finance only provides ~60 days of {interval} history. "
+                f"Clamping start_date from {start_date} to {_cutoff}."
+            )
+            start_date = _cutoff
+        else:
+            logger.warning(
+                f"Yahoo Finance only provides ~60 days of {interval} history. "
+                "Model will train on that window only."
+            )
+
     logger.info(f"Loading data for {symbol} from {start_date} to {end_date}")
-    data = get_stock_data(symbol, start_date, end_date, provider='yfinance')
+    data = get_yfinance_data(symbol, start_date, end_date, interval=interval)
     
     if data.empty:
         logger.error(f"No data found for {symbol} in the specified date range")
@@ -214,31 +245,49 @@ def predict_with_model(model, scaler, features: pd.DataFrame) -> np.ndarray:
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description='Train ML Strategy Model')
-    parser.add_argument('--symbol', type=str, default='AAPL', help='Symbol to train on')
-    parser.add_argument('--start', type=str, default='2020-01-01', help='Start date (YYYY-MM-DD)')
-    parser.add_argument('--end', type=str, default='2025-01-01', help='End date (YYYY-MM-DD)')
-    parser.add_argument('--model_path', type=str, default='models/ml_strategy_model.pkl', help='Path to save model')
-    parser.add_argument('--scaler_path', type=str, default='models/ml_strategy_scaler.pkl', help='Path to save scaler')
-    parser.add_argument('--tune', action='store_true', help='Perform hyperparameter tuning')
-    
+
+    _VALID_INTERVALS = ["1d", "1h", "30m", "15m", "5m", "2m", "1m"]
+
+    parser = argparse.ArgumentParser(
+        description="Train a RandomForest ML model for a trading symbol.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python train_model.py --symbol BTC-USD --interval 1h
+  python train_model.py --symbol EURUSD=X --interval 15m --start 2025-01-01
+  python train_model.py --symbol GC=F   --interval 1d  --tune
+""",
+    )
+    parser.add_argument("--symbol",      type=str, default="BTC-USD",
+                        help="Yahoo Finance ticker (default: BTC-USD)")
+    parser.add_argument("--start",       type=str, default="2020-01-01",
+                        help="Training start date YYYY-MM-DD (default: 2020-01-01)")
+    parser.add_argument("--end",         type=str, default="2025-12-31",
+                        help="Training end date   YYYY-MM-DD (default: 2025-12-31)")
+    parser.add_argument("--interval",    type=str, default="1d",
+                        choices=_VALID_INTERVALS,
+                        help="Candle size (default: 1d). Intraday limited to 60 days by Yahoo Finance.")
+    parser.add_argument("--model_path",  type=str, default=None,
+                        help="Override model save path (auto-named by default)")
+    parser.add_argument("--scaler_path", type=str, default=None,
+                        help="Override scaler save path (auto-named by default)")
+    parser.add_argument("--tune",        action="store_true",
+                        help="Run RandomizedSearchCV hyperparameter tuning (slower)")
+
     args = parser.parse_args()
-    
-    logger.info(f"Starting model training for {args.symbol}")
-    
-    # Train the model
+
     result = train_model(
         symbol=args.symbol,
         start_date=args.start,
         end_date=args.end,
         model_path=args.model_path,
         scaler_path=args.scaler_path,
-        tune=args.tune
+        tune=args.tune,
+        interval=args.interval,
     )
-    
+
     if result is not None:
-        trained_model, trained_scaler, accuracy = result
-        logger.info(f"Model trained successfully with accuracy: {accuracy:.4f}")
+        _, _, accuracy = result
+        logger.info(f"Training complete — accuracy: {accuracy:.4f}")
     else:
-        logger.error("Model training failed")
+        logger.error("Training failed")
