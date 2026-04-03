@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligence Portal</title>
+    <!-- Google Fonts: Inter and Orbitron for cyberpunk feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Orbitron:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <header class="main-header">
+        <div class="logo">
+            <h1 class="orbitron">INTEL</h1>
+        </div>
+        <div class="header-info">
+            <div class="status-badge" id="system-status"><span></span> ONLINE</div>
+            <div class="clock-group orbitron">
+                <span id="utc-clock">UTC: --:--:--</span>
+                <span id="ny-clock">NY: --:--:--</span>
+                <span id="ldn-clock">LDN: --:--:--</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- Sidebar: Market Pulse & News -->
+        <aside class="sidebar-left">
+            <div class="card pulse-card">
+                <h3 class="orbitron accent">MARKET PULSE</h3>
+                <div class="pulse-indicator" id="market-pulse">
+                    <span class="pulse-value">NEUTRAL</span>
+                    <span class="volatility">VOLATILITY: STABLE</span>
+                </div>
+            </div>
+
+            <div class="card news-card">
+                <h3 class="orbitron accent">RECENT NEWS</h3>
+                <div class="scroll-container" id="news-feed">
+                    <!-- News items injected here -->
+                    <div class="loading">Fetching intelligence...</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content: Consensus Matrix -->
+        <section class="main-content">
+            <div class="card matrix-card">
+                <div class="card-header">
+                    <h3 class="orbitron accent">ANALYST CONSENSUS MATRIX</h3>
+                    <div class="filter-controls">
+                        <input type="text" id="matrix-search" placeholder="Search symbol..." class="search-input">
+                        <div class="filter-group" id="matrix-filters">
+                            <button class="filter-btn active" data-filter="all">All</button>
+                            <button class="filter-btn" data-filter="Forex">Forex</button>
+                            <button class="filter-btn" data-filter="Crypto">Crypto</button>
+                            <button class="filter-btn" data-filter="Commodities">Commodities</button>
+                            <button class="filter-btn" data-filter="Stocks">Stocks</button>
+                        </div>
+                    </div>
+                    <div class="refresh-timer" id="next-cycle">NEXT CYCLE: --:--</div>
+                </div>
+                <div class="scroll-container" id="matrix-scroll-container">
+                    <div class="matrix-grid" id="consensus-matrix">
+                        <!-- Consensus rows injected here -->
+                        <div class="loading">Initializing agents...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-bottom">
+                <div class="card reliability-card">
+                    <h3 class="orbitron accent">ANALYST RELIABILITY</h3>
+                    <div class="reliability-bars" id="reliability-meter">
+                        <!-- Reliability bars injected here -->
+                    </div>
+                </div>
+                <div class="card movers-card">
+                    <h3 class="orbitron accent">TOP MOVERS // INTRADAY</h3>
+                    <div class="movers-container">
+                        <div class="movers-column">
+                            <h4 class="gainers-label">GAINERS</h4>
+                            <div id="gainers-list" class="movers-list"></div>
+                        </div>
+                        <div class="movers-column">
+                            <h4 class="losers-label">LOSERS</h4>
+                            <div id="losers-list" class="movers-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="terminal-footer">
+        <div class="terminal-container">
+            <span class="terminal-prompt">></span>
+            <input type="text" id="terminal-input" placeholder="analyze BTCUSD 1h" class="orbitron">
+            <div id="thought-log" class="thought-log">
+                Waiting for intelligence stream...
+            </div>
+        </div>
+    </footer>
+
+    <!-- Detail View Overlay -->
+    <div id="detail-overlay" class="detail-overlay hidden">
+        <div class="detail-content">
+            <header class="detail-header">
+                <div class="detail-title-group">
+                    <button id="close-detail" class="icon-btn"><i data-lucide="arrow-left"></i></button>
+                    <h2 id="detail-symbol" class="orbitron accent">SYMBOL</h2>
+                    <span id="detail-category" class="category-tag">Forex</span>
+                </div>
+                <div class="detail-stats">
+                    <div class="stat-item">
+                        <span class="label">Price</span>
+                        <span id="detail-price" class="value">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">Market Bias</span>
+                        <div class="bias-gauge-container">
+                            <div id="bias-fill" class="bias-fill"></div>
+                            <span id="detail-bias-text" class="bias-text">NEUTRAL</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="detail-grid">
+                <!-- Left: Charts & Indicators -->
+                <div class="detail-main">
+                    <div class="card chart-card">
+                        <h3 class="orbitron accent">PRICE ACTION // 100D</h3>
+                        <div class="chart-container">
+                            <canvas id="price-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card chart-card">
+                        <h3 class="orbitron accent">CONSENSUS HISTORY // AI CONFIDENCE</h3>
+                        <div class="chart-container signal-chart-container">
+                            <canvas id="signal-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="indicators-row">
+                        <div class="card indicator-card">
+                            <span class="label">RSI (14)</span>
+                            <span id="indicator-rsi" class="value">--</span>
+                        </div>
+                        <div class="card indicator-card">
+                            <span class="label">SMA (20)</span>
+                            <span id="indicator-sma" class="value">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Analysis & History -->
+                <div class="detail-sidebar">
+                    <div class="card reasoning-card">
+                        <h3 class="orbitron accent">AI INTELLIGENCE</h3>
+                        <div id="detail-memo" class="memo-text">
+                            No recent intelligence cycle for this symbol.
+                        </div>
+                        <div class="signal-breakdown">
+                            <div class="signal-item">
+                                <span class="label">Quant</span>
+                                <span id="signal-quant" class="value">--</span>
+                            </div>
+                            <div class="signal-item">
+                                <span class="label">Sentiment</span>
+                                <span id="signal-sentiment" class="value">--</span>
+                            </div>
+                            <div class="signal-item">
+                                <span class="label">Fundamentals</span>
+                                <span id="signal-fundamentals" class="value">--</span>
+                            </div>
+                        </div>
+                        <div class="consensus-summary">
+                            <span class="label">Consensus Score:</span>
+                            <span id="detail-consensus" class="value">--</span>
+                        </div>
+                    </div>
+
+                    <div class="card trade-history-card">
+                        <h3 class="orbitron accent">RECENT ACTIVITY</h3>
+                        <div id="detail-trades" class="trades-mini-list">
+                            <!-- Trades injected here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
