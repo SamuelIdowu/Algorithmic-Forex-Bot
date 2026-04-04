@@ -22,3 +22,5 @@ requests          # News headline fetching
 fastapi
 uvicorn
 python-multipart
+python-telegram-bot
+httpx

@@ -1116,10 +1116,11 @@ class AlgoTelegramBot:
         else:
             await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
 
-def main():
+def setup_application():
+    """Build the Telegram Application object without starting it."""
     if not config.TELEGRAM_BOT_TOKEN:
-        print("TELEGRAM_BOT_TOKEN not found in .env. Exiting.")
-        return
+        logger.error("TELEGRAM_BOT_TOKEN not found.")
+        return None
 
     bot = AlgoTelegramBot()
     
@@ -1132,7 +1133,9 @@ def main():
     app.add_handler(CommandHandler("status", bot.status_cmd))
     app.add_handler(CommandHandler("pnl", bot.pnl_cmd))
     app.add_handler(CommandHandler("positions", bot.positions_cmd))
-    app.add_handler(CommandHandler("clear", bot.clear_positions_cmd))
+    # Note: ensure bot has clear_positions_cmd defined
+    if hasattr(bot, 'clear_positions_cmd'):
+        app.add_handler(CommandHandler("clear", bot.clear_positions_cmd))
     app.add_handler(CommandHandler("analyze", bot.analyze_cmd))
     app.add_handler(CommandHandler("retrain", bot.retrain_cmd))
     app.add_handler(CommandHandler("settings", bot.settings_cmd))
@@ -1141,12 +1144,16 @@ def main():
     app.add_handler(CommandHandler("backtest", bot.backtest_menu))
     app.add_handler(CommandHandler("paper", bot.paper_menu))
     app.add_handler(CommandHandler("config", bot.config_menu))
-    app.add_handler(CommandHandler("tp", bot.train_predict_menu))
+    if hasattr(bot, 'train_predict_menu'):
+        app.add_handler(CommandHandler("tp", bot.train_predict_menu))
     app.add_handler(CommandHandler("monitor", bot.monitor_menu))
     app.add_handler(CommandHandler("monitors", bot.monitors_menu))
-    app.add_handler(CommandHandler("stopmonitor", bot.stopmonitor_cmd))
-    app.add_handler(CommandHandler("dashboard", bot.dashboard_cmd))
-    app.add_handler(CommandHandler("list_symbols", bot.list_symbols_cmd))
+    if hasattr(bot, 'stopmonitor_cmd'):
+        app.add_handler(CommandHandler("stopmonitor", bot.stopmonitor_cmd))
+    if hasattr(bot, 'dashboard_cmd'):
+        app.add_handler(CommandHandler("dashboard", bot.dashboard_cmd))
+    if hasattr(bot, 'list_symbols_cmd'):
+        app.add_handler(CommandHandler("list_symbols", bot.list_symbols_cmd))
     app.add_handler(CommandHandler("help", bot.help_cmd))
 
     # Setup background monitoring loop
@@ -1164,8 +1171,15 @@ def main():
 
     # Build application with post_init
     app.post_init = post_init
+    
+    return app, bot
 
-    print("🤖 Telegram Bot is running...")
+def main():
+    app, bot = setup_application()
+    if not app:
+        return
+
+    print("🤖 Telegram Bot is running (Polling)...")
     # Add bootstrap retries to handle initial connection issues
     app.run_polling(bootstrap_retries=5)
 

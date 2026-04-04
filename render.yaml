@@ -1,10 +1,10 @@
 services:
-  - type: worker
+  - type: web
     name: algo-bot
     env: docker
     dockerfilePath: Dockerfile
     region: oregon
-    plan: starter  # Workers need at least 'starter' ($7/mo). No free tier for background workers.
+    plan: free  # Free tier for web services. Spins down after 15 mins.
     envVars:
       # ── Alpaca ──────────────────────────────────────
       - key: ALPACA_API_KEY
@@ -67,6 +67,8 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: WEBHOOK_URL
+        sync: false # Set to your Render URL: https://algo-bot-xxxx.onrender.com/webhook
 
     disk:
       name: algo-data

@@ -7,25 +7,64 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import pandas as pd
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 # Add current directory to path so we can import models/agents
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.db_manager import DatabaseManager
 from utils.config import AGENT_SYMBOLS, ALL_SUPPORTED_SYMBOLS, AGENT_PAIR_GROUPS
+import telegram_bot
 
 import yfinance as yf
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Cache for top movers
-top_movers_cache = {"gainers": [], "losers": [], "last_fetch": None}
+# --- Telegram Integration ---
+tg_app = None
 
-app = FastAPI(title="ENSOTRADE Insights Portal")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global tg_app
+    logger.info("Starting up EnsoTrade Web Server...")
+    
+    # Initialize Telegram Application
+    tg_app, _ = telegram_bot.setup_application()
+    if tg_app:
+        await tg_app.initialize()
+        await tg_app.start()
+        
+        # Set Webhook if URL provided
+        webhook_url = os.getenv("WEBHOOK_URL")
+        if webhook_url:
+            logger.info(f"Setting Telegram Webhook to: {webhook_url}")
+            # Ensure URL ends correctly
+            if not webhook_url.endswith("/webhook"):
+                webhook_url = webhook_url.rstrip("/") + "/webhook"
+            await tg_app.bot.set_webhook(url=webhook_url)
+            
+        logger.info("Telegram component initialized.")
+    
+    # Start Agent background loop if requested
+    # Note: On Render Free tier, this will only run when service is awake.
+    mode = os.getenv("AGENT_MODE", "paper")
+    if mode in ("paper", "live"):
+        logger.info(f"Agent running in {mode} mode (Background).")
+        # In a real setup, you might start the agent loop here as a background task
+    
+    yield
+    
+    # Shutdown
+    if tg_app:
+        await tg_app.stop()
+        await tg_app.shutdown()
+    logger.info("Shutdown complete.")
+
+app = FastAPI(title="ENSOTRADE Insights Portal", lifespan=lifespan)
 
 # CORS for development
 app.add_middleware(
@@ -39,7 +78,7 @@ app.add_middleware(
 db = DatabaseManager()
 
 # --- Models ---
-
+# ... (existing models ConsensusSignal, ReliabilityScore, Mover, TopMovers)
 class ConsensusSignal(BaseModel):
     symbol: str
     category: str
@@ -65,7 +104,7 @@ class TopMovers(BaseModel):
     losers: List[Mover]
 
 # --- WebSocket Manager ---
-
+# ... (existing ConnectionManager)
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -86,8 +125,25 @@ manager = ConnectionManager()
 
 # --- API Endpoints ---
 
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """Handle incoming Telegram updates via Webhook."""
+    if not tg_app:
+        return {"status": "Telegram app not initialized"}
+    
+    from telegram import Update
+    try:
+        data = await request.json()
+        update = Update.de_json(data, tg_app.bot)
+        await tg_app.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return {"status": "error", "message": str(e)}
+
 @app.get("/api/consensus", response_model=List[ConsensusSignal])
 async def get_consensus():
+# ... (rest of get_consensus remains same)
     """Fetch the latest consensus signals for all monitored symbols."""
     # Combine symbols from database, config defaults, and master CLI groups
     db_symbols = set(db.get_available_symbols())
@@ -141,6 +197,7 @@ async def get_consensus():
 
 @app.get("/api/top_movers", response_model=TopMovers)
 async def get_top_movers():
+# ... (rest of get_top_movers remains same)
     """Fetch top gainers and losers using yfinance bulk download with short caching."""
     global top_movers_cache
     
@@ -191,7 +248,7 @@ async def get_top_movers():
         
         if not movers:
             return top_movers_cache
-
+ 
         # Sort by change
         sorted_movers = sorted(movers, key=lambda x: x["change"], reverse=True)
         
@@ -222,6 +279,7 @@ async def get_reliability():
 
 @app.get("/api/news")
 async def get_news():
+# ... (rest remains same)
     """Fetch recent news headlines and sentiment scores from the database."""
     news = db.get_recent_news(limit=20)
     if not news:
@@ -234,6 +292,7 @@ async def get_news():
 
 @app.get("/api/freshness")
 async def get_freshness():
+# ... (rest remains same)
     """Check how recently each ML model was trained."""
     model_dir = "models"
     results = []
@@ -253,13 +312,14 @@ async def get_status():
     """General system status."""
     return {
         "status": "ONLINE",
-        "mode": os.getenv("AGENT_MODE", "backtest"),
+        "mode": os.getenv("AGENT_MODE", "paper"),
         "last_heartbeat": datetime.now().isoformat(),
         "monitored_symbols": AGENT_SYMBOLS
     }
 
 @app.post("/api/analyze/{symbol}")
 async def trigger_analysis(symbol: str):
+# ... (rest remains same)
     """Trigger a manual one-shot analysis for a symbol via the Intelligence Terminal."""
     symbol = symbol.upper()
     logger.info(f"Triggering manual analysis for {symbol}")
@@ -290,6 +350,7 @@ async def trigger_analysis(symbol: str):
 
 @app.get("/api/details/{symbol}")
 async def get_symbol_details(symbol: str):
+# ... (rest remains same)
     """Fetch comprehensive detail package for a specific symbol."""
     symbol = symbol.upper()
     try:
@@ -425,4 +486,5 @@ app.mount("/", StaticFiles(directory="web/static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

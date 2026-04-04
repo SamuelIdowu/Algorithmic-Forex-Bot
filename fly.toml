@@ -1,0 +1,37 @@
+app = "algo-bot"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No HTTP service - this is a background worker bot
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[env]
+  ALPACA_BASE_URL    = "https://paper-api.alpaca.markets"
+  AGENT_MODE         = "paper"
+  AGENT_SYMBOLS      = "BTC-USD,EURUSD=X,GC=F"
+  AGENT_INTERVAL_MINUTES = "60"
+  AGENT_INITIAL_CAPITAL  = "10000"
+  SENTIMENT_ENGINE   = "groq"
+  GROQ_MODEL_8B      = "llama-3.1-8b-instant"
+  GROQ_MODEL_70B     = "llama-3.3-70b-versatile"
+  REQUIRED_VOTE_SCORE     = "0.55"
+  MAX_DRAWDOWN_PCT        = "15"
+  RISK_PER_TRADE_PCT      = "1"
+  ATR_SL_MULT             = "2.0"
+  ATR_TP_MULT             = "10.0"
+  RETRAIN_WIN_RATE_THRESHOLD = "0.45"
+  RETRAIN_MAX_AGE_DAYS    = "30"
+  RETRAIN_BOOTSTRAP       = "True"
+  TELEGRAM_ENABLED        = "True"
+  PYTHONUNBUFFERED        = "1"
+
+# Persistent volume for SQLite database
+[mounts]
+  source      = "algo_data"
+  destination = "/app/data"
