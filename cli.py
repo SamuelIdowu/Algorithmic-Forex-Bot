@@ -1,14 +1,17 @@
 """
-AI Hedge Fund — Interactive CLI
+ENSOTRADE Insights Engine — Interactive CLI
 
 Main menu choices:
-  1. 🤖 AI Hedge Fund (Agent Loop)   — autonomous multi-agent loop
-  2. 📈 Train Model                  — train / retrain an ML model
-  3. 🔮 Predict (Next Candle)        — single-symbol ML prediction
-  4. 📉 Backtest (Legacy)            — Backtrader strategy backtests
-  5. 💵 Paper Trading (Legacy)       — single-symbol Alpaca paper mode
-  6. 📊 Launch Dashboard             — Streamlit live dashboard
-  7. 🚪 Exit
+  1. 📈🔮 Train → Predict     — train then signal (full chain)
+  2. 📈  Train Model          — train / retrain an ML model
+  3. 🔮  Predict (Next Candle) — single-symbol ML prediction
+  4. 🔍  Analyze Symbol       — multi-agent deep analysis
+  5. 📋  Trackers             — manage monitoring schedules
+  6. ⚙️   Configure           — risk/reward params
+  7. 📊  Dashboard            — open insights portal
+  8. 💬  AI Chat              — institutional consultation
+  9. 🤖📱 Telegram Bot         — run the interactive bot
+ 10. 🚪  Exit
 """
 import os
 import re
@@ -34,7 +37,7 @@ _STYLE = Style([
 
 # ─── Symbol helpers ───────────────────────────────────────────────────────────
 
-# Flat list used by the single-symbol picker (Train / Predict / Backtest / Paper)
+# Flat list used by the single-symbol picker (Train / Predict / Analyze)
 COMMON_SYMBOLS = [
     # ── Forex ──────────────────────────────────────────────────────────────
     "EURUSD=X",  "GBPUSD=X",  "USDJPY=X",  "AUDUSD=X",  "USDCAD=X",
@@ -64,7 +67,7 @@ def _pick_symbol(prompt: str = "Select symbol:") -> str:
     return sel
 
 
-def _pick_symbols_multi(prompt: str = "Select pairs to trade:") -> list[str]:
+def _pick_symbols_multi(prompt: str = "Select pairs to analyze:") -> list[str]:
     """Multi-select checkbox picker with grouped pairs for the autonomous agent."""
     # Build flat questionary choices list, inserting separators for groups
     choices: list = []
@@ -174,53 +177,6 @@ def _write_env(updates: dict[str, str]) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 # Menu handlers
 # ══════════════════════════════════════════════════════════════════════════════
-
-def menu_agent_loop():
-    """🤖 AI Hedge Fund — Autonomous Agent Loop"""
-    print("\n🤖  AI Hedge Fund — Agent Loop\n")
-
-    mode = questionary.select(
-        "Mode:",
-        choices=[
-            questionary.Choice("Backtest  — historical simulation (safe)", value="backtest"),
-            questionary.Choice("Paper     — Alpaca paper account (safe)", value="paper"),
-            questionary.Choice("Live      — real money ⚠️",                value="live"),
-        ],
-        style=_STYLE,
-    ).ask()
-
-    symbols = _pick_symbols_multi("Select pairs to trade:")
-
-    interval = questionary.text(
-        "Cycle interval (minutes):", default="60", style=_STYLE
-    ).ask()
-
-    # Disable agents?
-    disable_agents = []
-    if questionary.confirm("Disable any agents?", default=False, style=_STYLE).ask():
-        choices = questionary.checkbox(
-            "Select agents to disable:",
-            choices=["SentimentAnalyst", "FundamentalsAnalyst",
-                     "RetrainerAgent", "QuantAnalyst"],
-            style=_STYLE,
-        ).ask()
-        disable_agents = choices or []
-
-    once = questionary.confirm("Run only once then exit?", default=(mode == "backtest"), style=_STYLE).ask()
-
-    cmd = [
-        sys.executable, "run_agent.py",
-        "--mode", mode,
-        "--symbols", *symbols,
-        "--interval", interval,
-    ]
-    if once:
-        cmd.append("--once")
-    if disable_agents:
-        cmd.extend(["--disable-agent", *disable_agents])
-
-    _run(cmd)
-
 
 def menu_retrain():
     """🔄 Retrain a model via the RetrainerAgent"""
@@ -349,6 +305,7 @@ def _run_predict(
         "--tp_mult",     tp_mult,
     ])
 
+
 def menu_predict():
     """🔮 Predict (Next Candle)"""
     print("\n🔮  Next-Candle Prediction\n")
@@ -363,68 +320,24 @@ def menu_train_predict():
     menu_train()
 
 
-def menu_backtest():
-    """📉 Backtest (Legacy Backtrader)"""
-    print("\n📉  Legacy Backtest\n")
-
-    strategy = questionary.select(
-        "Strategy:",
-        choices=[
-            "moving_average",
-            "rsi",
-            "ml_predictive",
-            "ml_predictive_risk_managed",
-        ],
+def menu_analyze():
+    """🔍 Multi-Agent Deep Analysis"""
+    print("\n🔍  Multi-Agent Analysis\n")
+    symbol = _pick_symbol("Symbol to analyze:")
+    timeframe = questionary.select(
+        "Candle interval:",
+        choices=["1d", "1h", "30m", "15m", "5m"],
         style=_STYLE,
     ).ask()
 
-    symbol = _pick_symbol("Symbol:")
-
-    timeframe  = "1d"
-    confidence = "0.7"
-    lookback   = "100"
-    sl_mult    = "2.0"
-    tp_mult    = "3.0"
-
-    if questionary.confirm("Customise strategy parameters?", default=False, style=_STYLE).ask():
-        timeframe = questionary.select(
-            "Timeframe:", choices=["1d", "1h", "15m", "5m"], style=_STYLE
-        ).ask()
-        if "ml" in strategy:
-            confidence = questionary.text("Confidence threshold:", default="0.7", style=_STYLE).ask()
-            lookback   = questionary.text("Lookback (candles):", default="100", style=_STYLE).ask()
-        if strategy == "ml_predictive_risk_managed":
-            sl_mult = questionary.text("Stop-loss ATR mult:",  default="2.0", style=_STYLE).ask()
-            tp_mult = questionary.text("Take-profit ATR mult:", default="3.0", style=_STYLE).ask()
-
-    env = os.environ.copy()
-    env.update({
-        "STRATEGY":             strategy,
-        "MODE":                 "backtest",
-        "TRADING_SYMBOL":       symbol,
-        "TIMEFRAME":            timeframe,
-        "CONFIDENCE_THRESHOLD": confidence,
-        "LOOKBACK_PERIOD":      lookback,
-        "RR_SL_MULT":           sl_mult,
-        "RR_TP_MULT":           tp_mult,
-    })
-
-    print(f"\n📉  {strategy} · {symbol} · {timeframe}")
-    _run([sys.executable, "main.py"], env=env)
-
-
-def menu_paper():
-    """💵 Paper Trading (Legacy Alpaca single-symbol)"""
-    print("\n💵  Legacy Paper Trading\n")
-    print("  ℹ️   For multi-symbol paper trading use: AI Hedge Fund → mode=paper\n")
-
-    symbol = _pick_symbol("Symbol:")
-    env = os.environ.copy()
-    env["MODE"] = "paper"
-    env["TRADING_SYMBOL"] = symbol
-
-    print(f"\n💵  Paper Trading: {symbol}")
-    _run([sys.executable, "main.py"], env=env)
+    # Run the insights engine once for this symbol
+    cmd = [
+        sys.executable, "run_agent.py",
+        "--symbols", symbol,
+        "--interval", "1",
+        "--once",
+    ]
+    _run(cmd)
 
 
 def menu_dashboard():
@@ -435,10 +348,9 @@ def menu_dashboard():
     _run([sys.executable, "web/server.py"])
 
 
-
 def menu_configure():
     """⚙️ Configure Trade Settings (edits .env live)"""
-    print("\n⚙️  Configure Trade Parameters\n")
+    print("\n⚙️  Configure Analysis Parameters\n")
     print("  Current values loaded from .env — press Enter to keep unchanged.\n")
 
     # ── Read current values ────────────────────────────────────────────────
@@ -446,10 +358,7 @@ def menu_configure():
     cur_tp      = _read_env("ATR_TP_MULT",           "3.0")
     cur_risk    = _read_env("RISK_PER_TRADE_PCT",    "1")
     cur_vote    = _read_env("REQUIRED_VOTE_SCORE",   "0.55")
-    cur_dd      = _read_env("MAX_DRAWDOWN_PCT",      "15")
-    cur_cap     = _read_env("AGENT_INITIAL_CAPITAL", "10000")
     cur_symbols = _read_env("AGENT_SYMBOLS",         "BTC-USD,EURUSD=X,GC=F")
-    cur_mode    = _read_env("AGENT_MODE",            "backtest")
 
     # ── Derive current R:R for display ────────────────────────────────────
     try:
@@ -458,8 +367,8 @@ def menu_configure():
         cur_rr = "N/A"
 
     print(f"  Current R:R  →  SL={cur_sl}×ATR  |  TP={cur_tp}×ATR  |  Ratio {cur_rr}")
-    print(f"  Risk/trade   →  {cur_risk}% of capital")
-    print(f"  Vote thresh  →  {cur_vote}  |  Max drawdown: {cur_dd}%\n")
+    print(f"  Risk/signal  →  {cur_risk}% notional")
+    print(f"  Vote thresh  →  {cur_vote}\n")
 
     # ── ATR Stop-Loss Multiplier ───────────────────────────────────────────
     sl_mult = questionary.text(
@@ -475,52 +384,26 @@ def menu_configure():
         validate=lambda v: v.replace(".", "", 1).isdigit() or "Enter a number (e.g. 3.0)",
     ).ask()
 
-    # ── Risk per Trade ─────────────────────────────────────────────────────
+    # ── Risk per Signal ────────────────────────────────────────────────────
     risk_pct = questionary.text(
-        f"Risk per trade % of capital (current: {cur_risk}):",
+        f"Notional risk per signal % (current: {cur_risk}):",
         default=cur_risk, style=_STYLE,
         validate=lambda v: v.replace(".", "", 1).isdigit() or "Enter a number (e.g. 1 or 0.5)",
     ).ask()
 
     # ── Vote score threshold ───────────────────────────────────────────────
     vote_score = questionary.text(
-        f"Min vote score to trigger trade 0–1 (current: {cur_vote}):",
+        f"Min vote score to trigger signal 0–1 (current: {cur_vote}):",
         default=cur_vote, style=_STYLE,
         validate=lambda v: (
             v.replace(".", "", 1).isdigit() and 0 < float(v) < 1
         ) or "Enter a decimal between 0 and 1 (e.g. 0.55)",
     ).ask()
 
-    # ── Max Drawdown Guard ────────────────────────────────────────────────
-    max_dd = questionary.text(
-        f"Max portfolio drawdown % before halting (current: {cur_dd}):",
-        default=cur_dd, style=_STYLE,
-        validate=lambda v: v.replace(".", "", 1).isdigit() or "Enter a number (e.g. 15)",
-    ).ask()
-
-    # ── Capital ────────────────────────────────────────────────────────────
-    capital = questionary.text(
-        f"Initial capital $ (current: {cur_cap}):",
-        default=cur_cap, style=_STYLE,
-        validate=lambda v: v.replace(".", "", 1).isdigit() or "Enter a number (e.g. 10000)",
-    ).ask()
-
     # ── Symbols ────────────────────────────────────────────────────────────
     symbols = questionary.text(
         f"Symbols, comma-separated (current: {cur_symbols}):",
         default=cur_symbols, style=_STYLE,
-    ).ask()
-
-    # ── Mode ──────────────────────────────────────────────────────────────
-    mode = questionary.select(
-        f"Agent mode (current: {cur_mode}):",
-        choices=[
-            questionary.Choice("backtest  — historical simulation (safe)", value="backtest"),
-            questionary.Choice("paper     — Alpaca paper account (safe)",   value="paper"),
-            questionary.Choice("live      — real money ⚠️",                  value="live"),
-        ],
-        default=cur_mode if cur_mode in ("backtest", "paper", "live") else "backtest",
-        style=_STYLE,
     ).ask()
 
     # ── Preview ────────────────────────────────────────────────────────────
@@ -531,30 +414,24 @@ def menu_configure():
 
     print(f"""
   ┌─────────────────────────────────────────┐
-  │  📋  New Trade Configuration            │
+  │  📋  New Analysis Configuration         │
   ├─────────────────────────────────────────┤
   │  Stop-Loss   : {sl_mult:>6} × ATR              │
   │  Take-Profit : {tp_mult:>6} × ATR              │
   │  R:R Ratio   : {rr_preview:<24} │
-  │  Risk/trade  : {risk_pct:>5}% of capital        │
+  │  Risk/signal : {risk_pct:>5}% notional          │
   │  Vote thresh : {vote_score:<24} │
-  │  Max DD      : {max_dd:>5}%                    │
-  │  Capital     : ${float(capital):>10,.0f}            │
   │  Symbols     : {symbols[:24]:<24} │
-  │  Mode        : {mode:<24} │
   └─────────────────────────────────────────┘
 """)
 
     if questionary.confirm("Save these settings to .env?", default=True, style=_STYLE).ask():
         _write_env({
-            "ATR_SL_MULT":           sl_mult,
-            "ATR_TP_MULT":           tp_mult,
-            "RISK_PER_TRADE_PCT":    risk_pct,
-            "REQUIRED_VOTE_SCORE":   vote_score,
-            "MAX_DRAWDOWN_PCT":      max_dd,
-            "AGENT_INITIAL_CAPITAL": capital,
-            "AGENT_SYMBOLS":         symbols,
-            "AGENT_MODE":            mode,
+            "ATR_SL_MULT":         sl_mult,
+            "ATR_TP_MULT":         tp_mult,
+            "RISK_PER_TRADE_PCT":  risk_pct,
+            "REQUIRED_VOTE_SCORE": vote_score,
+            "AGENT_SYMBOLS":       symbols,
         })
         print("\n✅  Settings saved to .env — will be applied on the next agent run.\n")
     else:
@@ -566,43 +443,38 @@ def menu_configure():
 # ══════════════════════════════════════════════════════════════════════════════
 
 _BANNER = r"""
-  █████╗ ██╗   ██╗
- ██╔══██╗██║   ██║   AI Hedge Fund v2.0
- ███████║██║   ██║   Autonomous · Self-Improving · Multi-Asset
- ██╔══██║██║   ██║
- ██║  ██║╚██████╔╝
- ╚═╝  ╚═╝ ╚═════╝
+  ███████╗███╗   ██╗██████╗
+  ██╔════╝████╗  ██║██╔══██╗
+  ███████╗██╔██╗ ██║██║  ██║
+  ╚════██║██║╚██╗██║██║  ██║
+  ███████║██║ ╚████║██████╔╝
+  ╚══════╝╚═╝  ╚═══╝╚═════╝  INSIGHTS ENGINE v3.0
 """
 
 _MENU_CHOICES = [
-    questionary.Choice("🤖  AI Hedge Fund   — autonomous agent loop",  value="agent"),
-    questionary.Choice("🔄  Retrain Model   — force model retrain",    value="retrain"),
-    questionary.Separator("─── Settings ─────────────────────────────────"),
-    questionary.Choice("⚙️   Configure       — trade params & risk/reward", value="configure"),
-    questionary.Separator("─── Legacy Tools ─────────────────────────────"),
     questionary.Choice("📈🔮 Train → Predict  — train then signal",      value="train_predict"),
-    questionary.Choice("📈  Train Model     — train an ML model",       value="train"),
-    questionary.Choice("🔮  Predict         — one-shot next-candle",    value="predict"),
-    questionary.Choice("📉  Backtest        — Backtrader strategy",     value="backtest"),
-    questionary.Choice("💵  Paper Trading   — single-symbol Alpaca",    value="paper"),
-    questionary.Separator("─── Dashboard ────────────────────────────────"),
-    questionary.Choice("📊  Dashboard       — open Streamlit UI",       value="dashboard"),
-    questionary.Separator("─── Interactive ─────────────────────────────"),
-    questionary.Choice("💬  AI Chat         — institutional consultation", value="chat"),
-    questionary.Choice("🤖📱 Telegram Bot    — run the interactive bot",    value="telegram"),
+    questionary.Choice("📈  Train Model       — train an ML model",     value="train"),
+    questionary.Choice("🔮  Predict           — one-shot next-candle",  value="predict"),
+    questionary.Separator("─── Analysis ─────────────────────────────────"),
+    questionary.Choice("🔄  Retrain Model     — force model retrain",   value="retrain"),
+    questionary.Choice("🔍  Analyze Symbol    — multi-agent deep analysis", value="analyze"),
+    questionary.Separator("─── Settings ──────────────────────────────────"),
+    questionary.Choice("⚙️   Configure        — risk/reward params",    value="configure"),
+    questionary.Separator("─── Interfaces ────────────────────────────────"),
+    questionary.Choice("📊  Dashboard         — open insights portal",  value="dashboard"),
+    questionary.Choice("💬  AI Chat           — institutional consultation", value="chat"),
+    questionary.Choice("🤖📱 Telegram Bot      — run the interactive bot",    value="telegram"),
     questionary.Separator(),
     questionary.Choice("🚪  Exit",                                       value="exit"),
 ]
 
 _ACTION_MAP = {
-    "agent":         menu_agent_loop,
-    "retrain":       menu_retrain,
-    "configure":     menu_configure,
     "train_predict": menu_train_predict,
     "train":         menu_train,
     "predict":       menu_predict,
-    "backtest":      menu_backtest,
-    "paper":         menu_paper,
+    "retrain":       menu_retrain,
+    "analyze":       menu_analyze,
+    "configure":     menu_configure,
     "dashboard":     menu_dashboard,
     "chat":          lambda: _run([sys.executable, "chat_cli.py"]),
     "telegram":      lambda: _run([sys.executable, "telegram_bot.py"]),

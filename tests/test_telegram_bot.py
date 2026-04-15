@@ -10,27 +10,23 @@ class TestTelegramBotLogic(unittest.TestCase):
 
     def test_status_text(self):
         # Mock DB responses
-        self.bot.db.get_portfolio_value.return_value = 11000.0
-        self.bot.db.get_total_deployed.return_value = 2000.0
-        self.bot.db.get_all_positions.return_value = MagicMock(len=lambda: 2)
-        
+        self.bot.db.get_prediction_baseline.return_value = 10500.0
+
         # We'll just check if it constructs the status without error
         update = MagicMock()
         update.callback_query = None
         update.message.reply_text = unittest.mock.AsyncMock()
         context = MagicMock()
-        
+
         import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(self.bot.status_cmd(update, context))
-        
-        self.bot.db.get_portfolio_value.assert_called_once()
-        self.bot.db.get_total_deployed.assert_called_once()
+
+        self.bot.db.get_prediction_baseline.assert_called_once()
         update.message.reply_text.assert_called_once()
         args, kwargs = update.message.reply_text.call_args
-        self.assertIn("Portfolio Status", args[0])
-        self.assertIn("11,000.00", args[0])
+        self.assertIn("System Status", args[0])
 
     @patch('telegram_bot.ChiefInvestmentOfficer')
     def test_analyze_cmd(self, mock_cio):

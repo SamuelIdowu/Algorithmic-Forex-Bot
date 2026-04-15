@@ -111,12 +111,12 @@ RETRAIN_MAX_AGE_DAYS=30
 
 ## 🤖📱 Telegram Bot Integration
 
-Monitor your portfolio and control the bot from any device via Telegram.
+Monitor market analysis and control the bot from any device via Telegram.
 
 ### Features
-- **Real-time Alerts**: Push notifications for every BUY/SELL order including entry prices and CIO rationales.
+- **Real-time Alerts**: Push notifications for every BUY/SELL signal including entry prices and CIO rationales.
 - **Interactive Commands**: Use the built-in menu or commands to manage the bot.
-- **AI Chat**: Directly consult with the LLM fund manager about your strategy or performance.
+- **AI Chat**: Directly consult with the LLM fund manager about strategies or predictions.
 
 ### Setup
 1. Message [@BotFather](https://t.me/botfather) on Telegram to create a bot and get a **Token**.
@@ -131,8 +131,9 @@ Monitor your portfolio and control the bot from any device via Telegram.
 
 ### Commands
 - `/start` - Launch the interactive main menu.
-- `/status` - Current portfolio value and active positions.
-- `/pnl` - Performance report for the last 50 trades.
+- `/status` - System status and prediction metrics.
+- `/predictions` - Prediction accuracy & analytics.
+- `/signals` - Recent prediction signals with TP/SL levels.
 - `/analyze <symbol>` - Fetch the latest CIO reasoning for a symbol.
 - `/list_symbols` - View all natively supported symbols and categories.
 - `/train [symbol]` - Interactive menu to train models. If symbol provided (e.g. `/train AAPL`), goes straight to interval selection.
@@ -151,13 +152,13 @@ Monitor your portfolio and control the bot from any device via Telegram.
 
 ## 💬 AI Consultation (CLI)
 
-Consult with the AI Fund Manager directly in your terminal. The manager has full context of your database (trades, positions, analyst performance).
+Consult with the AI Fund Manager directly in your terminal. The manager has full context of your database (trade history, analyst performance).
 
 ```bash
 python chat_cli.py
 ```
 
-- Ask: *"Why did we lose money on BTC last week?"*
+- Ask: *"Why did the bot signal SELL on BTC last week?"*
 - Ask: *"What is our current biggest risk?"*
 - Ask: *"Which analyst is performing best?"*
 

@@ -18,7 +18,7 @@ def main():
     print("\n" + "="*60)
     print("🤖  AI HEDGE FUND — INSTITUTIONAL CONSULTATION (CLI)")
     print("="*60)
-    print("Ask about recent trades, portfolio risk, or current strategy.")
+    print("Ask about recent trades, market analysis, or trading strategy.")
     print("Type 'exit' or 'quit' to leave.\n")
 
     while True:

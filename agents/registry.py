@@ -2,7 +2,7 @@
 Agent Registry — Auto-discovers all BaseAgent subclasses in the agents/ package.
 
 Agents are sorted by their `priority` attribute so the orchestrator always
-runs them in the correct order (data → quant → sentiment → risk → portfolio).
+runs them in the correct order (data → quant → sentiment → risk → logger).
 
 To disable an agent without deleting it: set `enabled = False` on the class,
 or pass its name to discover_agents(disabled=["sentiment"]).

@@ -28,16 +28,9 @@ class ChatAgent(BaseAgent):
         """
         # 1. Fetch context from DB
         recent_trades = self._db.get_all_trades(limit=5)
-        positions = self._db.get_all_positions()
-        
+
         # 2. Format context for LLM
-        context_str = "CURRENT PORTFOLIO STATE:\n"
-        if positions.empty:
-            context_str += "No open positions.\n"
-        else:
-            context_str += positions.to_string(index=False) + "\n"
-            
-        context_str += "\nRECENT TRADE HISTORY:\n"
+        context_str = "RECENT TRADE HISTORY:\n"
         if recent_trades.empty:
             context_str += "No trade history yet.\n"
         else:

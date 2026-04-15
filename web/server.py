@@ -51,8 +51,8 @@ async def lifespan(app: FastAPI):
     
     # Start Agent background loop if requested
     # Note: On Render Free tier, this will only run when service is awake.
-    mode = os.getenv("AGENT_MODE", "paper")
-    if mode in ("paper", "live"):
+    mode = "insights"
+    if mode in ("paper", "live", "insights"):
         logger.info(f"Agent running in {mode} mode (Background).")
         # In a real setup, you might start the agent loop here as a background task
     
@@ -312,7 +312,7 @@ async def get_status():
     """General system status."""
     return {
         "status": "ONLINE",
-        "mode": os.getenv("AGENT_MODE", "paper"),
+        "mode": "insights",
         "last_heartbeat": datetime.now().isoformat(),
         "monitored_symbols": AGENT_SYMBOLS
     }

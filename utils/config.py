@@ -77,39 +77,16 @@ for _, pairs in AGENT_PAIR_GROUPS:
         ALL_SUPPORTED_SYMBOLS.append(ticker)
 
 
-# Trading mode
-MODE = os.getenv("MODE", "backtest")
-STRATEGY = os.getenv("STRATEGY", "moving_average")
-TRADING_SYMBOL = os.getenv("TRADING_SYMBOL", "AAPL")
+# ─── Legacy Backtest Settings (deprecated — kept for backward compat) ─────────
+# These are no longer used by the insights engine but may exist in old .env files
+# MODE, STRATEGY, TRADING_SYMBOL, ALPACA_*
 
-# Alpaca API credentials
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
-ALPACA_API_SECRET = os.getenv("ALPACA_API_SECRET")
-ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
-
-# Alpha Vantage API key
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
-
-# Finnhub API key
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
-
-# Default settings
-INITIAL_CAPITAL = 10000
-COMMISSION_PER_TRADE = 0.0  # Set to 0 for no commission
-
-# Strategy Settings
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
-RISK_REWARD_SL_MULT = float(os.getenv("RR_SL_MULT", "2.0"))
-RISK_REWARD_TP_MULT = float(os.getenv("RR_TP_MULT", "3.0"))
-TIMEFRAME = os.getenv("TIMEFRAME", "1d")
-LOOKBACK_PERIOD = int(os.getenv("LOOKBACK_PERIOD", "100"))
-
-# Forex settings
-FOREX_TRADING_PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF"]
+# API keys still used by sentiment/data agents
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 
 # ─── AI Hedge Fund Agent Config ───────────────────────────────────────────────
 
-# Comma-separated list of symbols the agent loop trades
+# Comma-separated list of symbols the agent loop analyzes
 # If set to 'ALL', use ALL_SUPPORTED_SYMBOLS from the master list
 AGENT_SYMBOL_DEFAULTS = "BTC-USD,EURUSD=X,GC=F"
 _raw_symbols = os.getenv("AGENT_SYMBOLS", AGENT_SYMBOL_DEFAULTS)
@@ -121,10 +98,6 @@ else:
 # ──────────────────────────────────────────────────────────────────────────────
 
 AGENT_INTERVAL_MINUTES = int(os.getenv("AGENT_INTERVAL_MINUTES", "60"))
-AGENT_MODE = os.getenv("AGENT_MODE", "backtest")   # backtest | paper | live
-
-# Initial capital used by the portfolio manager in backtest/paper mode
-AGENT_INITIAL_CAPITAL = float(os.getenv("AGENT_INITIAL_CAPITAL", "10000"))
 
 # ─── Sentiment ────────────────────────────────────────────────────────────────
 SENTIMENT_ENGINE = os.getenv("SENTIMENT_ENGINE", "vader")  # vader | groq
@@ -136,7 +109,7 @@ GROQ_MODEL_8B = os.getenv("GROQ_MODEL_8B", "llama-3.1-8b-instant")
 # ─── Risk Thresholds ──────────────────────────────────────────────────────────
 # Weighted vote score must exceed this to trigger BUY (and drop below 1-threshold for SELL)
 REQUIRED_VOTE_SCORE = float(os.getenv("REQUIRED_VOTE_SCORE", "0.55"))
-# Stop all new entries if total portfolio drawdown exceeds this %
+# Maximum drawdown threshold before halting signals (risk management)
 MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "15"))
 # Fraction of capital risked per trade (for ATR-based position sizing)
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "1")) / 100.0
@@ -155,21 +128,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 def validate_config():
-    """Validate that required configuration values are present based on the mode"""
-    if MODE in ["live", "paper"]:
-        required_keys = ["ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_BASE_URL"]
-        for key in required_keys:
-            if not os.getenv(key):
-                raise ValueError(f"Missing required environment variable: {key}")
-    
-    if MODE == "backtest":
-        if not ALPHA_VANTAGE_API_KEY:
-            raise ValueError("Missing required environment variable: ALPHA_VANTAGE_API_KEY")
-    
+    """Validate that required configuration values are present."""
     if TELEGRAM_ENABLED:
         if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
             raise ValueError("TELEGRAM_ENABLED is True but token or chat_id is missing.")
-    
     return True
 
 def write_config(updates: dict[str, str]) -> None:

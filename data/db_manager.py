@@ -56,6 +56,27 @@ class DatabaseManager:
                 )
             ''')
 
+            # ── New: predictions audit trail (insights engine) ─────────────
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS predictions (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp           DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    symbol              TEXT NOT NULL,
+                    action              TEXT NOT NULL,
+                    entry_price         REAL,
+                    stop_loss           REAL,
+                    take_profit         REAL,
+                    vote_score          REAL,
+                    weights_used        TEXT,
+                    quant_signal        TEXT,
+                    quant_confidence    REAL,
+                    sentiment_signal    TEXT,
+                    fundamentals_signal TEXT,
+                    cio_memo            TEXT,
+                    current_price       REAL
+                )
+            ''')
+
             # ── New: full trade audit trail ────────────────────────────────
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS agent_trades (
@@ -322,6 +343,54 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting latest consensus for {symbol}: {e}")
             return pd.DataFrame()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # New: predictions helpers (insights engine)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def log_prediction(self, symbol: str, action: str, entry_price: float,
+                       stop_loss: float, take_profit: float, vote_score: float,
+                       weights_used: dict, quant_signal: str, quant_confidence: float,
+                       sentiment_signal: str, fundamentals_signal: str,
+                       cio_memo: str, current_price: float) -> int:
+        """
+        Insert a prediction record. Returns the inserted row id.
+        Used by PredictionLogger to log every analysis cycle without executing trades.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT INTO predictions
+                (symbol, action, entry_price, stop_loss, take_profit,
+                 vote_score, weights_used, quant_signal, quant_confidence,
+                 sentiment_signal, fundamentals_signal, cio_memo, current_price)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                symbol, action, entry_price, stop_loss, take_profit,
+                round(vote_score, 4), json.dumps(weights_used),
+                quant_signal, round(quant_confidence, 4),
+                sentiment_signal, fundamentals_signal, cio_memo,
+                round(current_price, 6) if current_price else None,
+            ))
+            self.conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error logging prediction for {symbol}: {e}")
+            return -1
+
+    def get_recent_predictions(self, symbol: str = None, limit: int = 20) -> pd.DataFrame:
+        """Return recent predictions, optionally filtered by symbol."""
+        try:
+            if symbol:
+                query = "SELECT * FROM predictions WHERE symbol=? ORDER BY id DESC LIMIT ?"
+                return pd.read_sql_query(query, self.conn, params=(symbol, limit))
+            else:
+                query = "SELECT * FROM predictions ORDER BY id DESC LIMIT ?"
+                return pd.read_sql_query(query, self.conn, params=[limit])
+        except Exception as e:
+            logger.error(f"Error fetching recent predictions: {e}")
+            return pd.DataFrame()
+
     def get_all_trades(self, limit: int = 50) -> pd.DataFrame:
         """Return the most recent trades across all symbols."""
         try:
@@ -332,101 +401,20 @@ class DatabaseManager:
             return pd.DataFrame()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # New: agent_state helpers
+    # Baseline & performance helpers
     # ═══════════════════════════════════════════════════════════════════════
 
-    def get_open_position(self, symbol: str) -> Optional[dict]:
-        """Return the current open position for a symbol, or None."""
+    def get_prediction_baseline(self) -> Optional[float]:
+        """Return a virtual baseline = notional capital + cumulative PnL (insights engine metric)."""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM agent_state WHERE symbol=?", (symbol,))
-            row = cursor.fetchone()
-            if row and row["position_size"] and row["position_size"] != 0:
-                return dict(row)
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching open position for {symbol}: {e}")
-            return None
-
-    def set_position(self, symbol: str, position_size: float, entry_price: float,
-                     stop_loss: float, take_profit: float, trade_id: int):
-        """Upsert an open position."""
-        try:
-            cash_deployed = position_size * entry_price
-            self.conn.execute('''
-                INSERT INTO agent_state (symbol, position_size, entry_price, stop_loss,
-                                         take_profit, cash_deployed, trade_id, last_updated)
-                VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-                ON CONFLICT(symbol) DO UPDATE SET
-                    position_size=excluded.position_size,
-                    entry_price=excluded.entry_price,
-                    stop_loss=excluded.stop_loss,
-                    take_profit=excluded.take_profit,
-                    cash_deployed=excluded.cash_deployed,
-                    trade_id=excluded.trade_id,
-                    last_updated=CURRENT_TIMESTAMP
-            ''', (symbol, position_size, entry_price, stop_loss, take_profit, cash_deployed, trade_id))
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"Error setting position for {symbol}: {e}")
-
-    def clear_position(self, symbol: str):
-        """Remove position record when trade closes."""
-        try:
-            self.conn.execute(
-                "UPDATE agent_state SET position_size=0, entry_price=0, "
-                "stop_loss=0, take_profit=0, cash_deployed=0, trade_id=NULL, "
-                "last_updated=CURRENT_TIMESTAMP WHERE symbol=?", (symbol,)
-            )
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"Error clearing position for {symbol}: {e}")
-
-    def clear_all_positions(self):
-        """Remove all position records from agent_state."""
-        try:
-            self.conn.execute(
-                "UPDATE agent_state SET position_size=0, entry_price=0, "
-                "stop_loss=0, take_profit=0, cash_deployed=0, trade_id=NULL, "
-                "last_updated=CURRENT_TIMESTAMP"
-            )
-            self.conn.commit()
-            logger.info("Cleared all positions in database.")
-        except Exception as e:
-            logger.error(f"Error clearing all positions: {e}")
-
-    def get_total_deployed(self) -> float:
-        """Return total cash deployed across all open positions."""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT SUM(cash_deployed) FROM agent_state WHERE position_size != 0")
-            result = cursor.fetchone()
-            return float(result[0] or 0.0)
-        except Exception as e:
-            logger.error(f"Error getting total deployed: {e}")
-            return 0.0
-
-    def get_portfolio_value(self) -> Optional[float]:
-        """Approximate portfolio value = initial capital (mark-to-market not tracked here)."""
-        try:
-            from utils.config import AGENT_INITIAL_CAPITAL
+            NOTIONAL_CAPITAL = 10000.0
             cursor = self.conn.cursor()
             cursor.execute("SELECT COALESCE(SUM(pnl), 0) FROM agent_trades WHERE pnl IS NOT NULL")
             total_pnl = float(cursor.fetchone()[0] or 0.0)
-            return AGENT_INITIAL_CAPITAL + total_pnl
+            return NOTIONAL_CAPITAL + total_pnl
         except Exception as e:
-            logger.error(f"Error computing portfolio value: {e}")
+            logger.error(f"Error computing prediction baseline: {e}")
             return None
-
-    def get_all_positions(self) -> pd.DataFrame:
-        """Return all open positions."""
-        try:
-            return pd.read_sql_query(
-                "SELECT * FROM agent_state WHERE position_size != 0", self.conn
-            )
-        except Exception as e:
-            logger.error(f"Error fetching positions: {e}")
-            return pd.DataFrame()
 
     # ═══════════════════════════════════════════════════════════════════════
     # New: agent_performance helpers (Layer 2 adaptive weights)
