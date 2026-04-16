@@ -22,13 +22,15 @@ import requests
 
 from agents.base_agent import BaseAgent
 from utils.config import (
-    ALPHA_VANTAGE_API_KEY,
     NEWS_API_KEY,
     FINNHUB_API_KEY,
     GROQ_API_KEY,
     GROQ_MODEL_8B,
     SENTIMENT_ENGINE,
 )
+
+# Alpha Vantage key is no longer in config; read directly from env
+ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "")
 
 logger = logging.getLogger(__name__)
 

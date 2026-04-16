@@ -2,23 +2,19 @@ pandas
 numpy
 matplotlib
 yfinance
-backtrader
 python-dotenv
-ccxt
-alpha-vantage==2.3.1
-alpaca-trade-api
 TA-Lib
 scikit-learn
 joblib
 questionary
 
-# ── AI Hedge Fund additions ────────────────────────────────────────────────────
+# ── AI / NLP ───────────────────────────────────────────────────────────────────
 schedule          # Autonomous loop scheduling
 vaderSentiment    # Offline NLP sentiment (no API key needed)
 groq              # Optional: Groq LLM sentiment (set SENTIMENT_ENGINE=groq)
 requests          # News headline fetching
 
-# ── Dashboard Implementation ────────────────────────────────────────────────────
+# ── Dashboard & Interfaces ─────────────────────────────────────────────────────
 fastapi
 uvicorn
 python-multipart

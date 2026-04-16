@@ -3,7 +3,7 @@ import json
 import pandas as pd
 from typing import Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -53,6 +53,27 @@ class DatabaseManager:
                     close REAL NOT NULL,
                     volume INTEGER NOT NULL,
                     PRIMARY KEY (timestamp, symbol)
+                )
+            ''')
+
+            # ── New: predictions audit trail (insights engine) ─────────────
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS predictions (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp           DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    symbol              TEXT NOT NULL,
+                    action              TEXT NOT NULL,
+                    entry_price         REAL,
+                    stop_loss           REAL,
+                    take_profit         REAL,
+                    vote_score          REAL,
+                    weights_used        TEXT,
+                    quant_signal        TEXT,
+                    quant_confidence    REAL,
+                    sentiment_signal    TEXT,
+                    fundamentals_signal TEXT,
+                    cio_memo            TEXT,
+                    current_price       REAL
                 )
             ''')
 
@@ -142,6 +163,54 @@ class DatabaseManager:
                     interval    TEXT NOT NULL,
                     last_run    DATETIME,
                     PRIMARY KEY (chat_id, symbol)
+                )
+            ''')
+
+            # ── New: prediction tracker (virtual trade lifecycle) ─────────
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS prediction_tracker (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prediction_id           INTEGER REFERENCES predictions(id),
+                    source                  TEXT NOT NULL,
+                    symbol                  TEXT NOT NULL,
+                    direction               TEXT NOT NULL,
+                    timeframe               TEXT NOT NULL,
+                    entry_price             REAL NOT NULL,
+                    take_profit             REAL,
+                    stop_loss               REAL,
+                    status                  TEXT DEFAULT 'ACTIVE',
+                    current_price           REAL,
+                    pnl_percent             REAL,
+                    rsi                     REAL,
+                    atr                     REAL,
+                    bb_pos                  REAL,
+                    ml_confidence           REAL,
+                    quant_confidence        REAL,
+                    vote_score              REAL,
+                    tp_hit_at               DATETIME,
+                    sl_hit_at               DATETIME,
+                    direction_check_at      DATETIME,
+                    direction_result        TEXT,
+                    final_price_at_outcome  REAL,
+                    max_profit_reached      REAL,
+                    max_loss_reached        REAL,
+                    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_checked_at         DATETIME,
+                    expires_at              DATETIME,
+                    reasoning               TEXT,
+                    agent_insights_json     TEXT
+                )
+            ''')
+
+            # ── New: price check log (audit trail for active predictions) ─
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS price_check_log (
+                    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tracker_id              INTEGER REFERENCES prediction_tracker(id),
+                    checked_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    price_at_check          REAL,
+                    pnl_at_check            REAL,
+                    status_at_check         TEXT
                 )
             ''')
 
@@ -322,6 +391,54 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting latest consensus for {symbol}: {e}")
             return pd.DataFrame()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # New: predictions helpers (insights engine)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def log_prediction(self, symbol: str, action: str, entry_price: float,
+                       stop_loss: float, take_profit: float, vote_score: float,
+                       weights_used: dict, quant_signal: str, quant_confidence: float,
+                       sentiment_signal: str, fundamentals_signal: str,
+                       cio_memo: str, current_price: float) -> int:
+        """
+        Insert a prediction record. Returns the inserted row id.
+        Used by PredictionLogger to log every analysis cycle without executing trades.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT INTO predictions
+                (symbol, action, entry_price, stop_loss, take_profit,
+                 vote_score, weights_used, quant_signal, quant_confidence,
+                 sentiment_signal, fundamentals_signal, cio_memo, current_price)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                symbol, action, entry_price, stop_loss, take_profit,
+                round(vote_score, 4), json.dumps(weights_used),
+                quant_signal, round(quant_confidence, 4),
+                sentiment_signal, fundamentals_signal, cio_memo,
+                round(current_price, 6) if current_price else None,
+            ))
+            self.conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error logging prediction for {symbol}: {e}")
+            return -1
+
+    def get_recent_predictions(self, symbol: str = None, limit: int = 20) -> pd.DataFrame:
+        """Return recent predictions, optionally filtered by symbol."""
+        try:
+            if symbol:
+                query = "SELECT * FROM predictions WHERE symbol=? ORDER BY id DESC LIMIT ?"
+                return pd.read_sql_query(query, self.conn, params=(symbol, limit))
+            else:
+                query = "SELECT * FROM predictions ORDER BY id DESC LIMIT ?"
+                return pd.read_sql_query(query, self.conn, params=[limit])
+        except Exception as e:
+            logger.error(f"Error fetching recent predictions: {e}")
+            return pd.DataFrame()
+
     def get_all_trades(self, limit: int = 50) -> pd.DataFrame:
         """Return the most recent trades across all symbols."""
         try:
@@ -332,101 +449,20 @@ class DatabaseManager:
             return pd.DataFrame()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # New: agent_state helpers
+    # Baseline & performance helpers
     # ═══════════════════════════════════════════════════════════════════════
 
-    def get_open_position(self, symbol: str) -> Optional[dict]:
-        """Return the current open position for a symbol, or None."""
+    def get_prediction_baseline(self) -> Optional[float]:
+        """Return a virtual baseline = notional capital + cumulative PnL (insights engine metric)."""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM agent_state WHERE symbol=?", (symbol,))
-            row = cursor.fetchone()
-            if row and row["position_size"] and row["position_size"] != 0:
-                return dict(row)
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching open position for {symbol}: {e}")
-            return None
-
-    def set_position(self, symbol: str, position_size: float, entry_price: float,
-                     stop_loss: float, take_profit: float, trade_id: int):
-        """Upsert an open position."""
-        try:
-            cash_deployed = position_size * entry_price
-            self.conn.execute('''
-                INSERT INTO agent_state (symbol, position_size, entry_price, stop_loss,
-                                         take_profit, cash_deployed, trade_id, last_updated)
-                VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-                ON CONFLICT(symbol) DO UPDATE SET
-                    position_size=excluded.position_size,
-                    entry_price=excluded.entry_price,
-                    stop_loss=excluded.stop_loss,
-                    take_profit=excluded.take_profit,
-                    cash_deployed=excluded.cash_deployed,
-                    trade_id=excluded.trade_id,
-                    last_updated=CURRENT_TIMESTAMP
-            ''', (symbol, position_size, entry_price, stop_loss, take_profit, cash_deployed, trade_id))
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"Error setting position for {symbol}: {e}")
-
-    def clear_position(self, symbol: str):
-        """Remove position record when trade closes."""
-        try:
-            self.conn.execute(
-                "UPDATE agent_state SET position_size=0, entry_price=0, "
-                "stop_loss=0, take_profit=0, cash_deployed=0, trade_id=NULL, "
-                "last_updated=CURRENT_TIMESTAMP WHERE symbol=?", (symbol,)
-            )
-            self.conn.commit()
-        except Exception as e:
-            logger.error(f"Error clearing position for {symbol}: {e}")
-
-    def clear_all_positions(self):
-        """Remove all position records from agent_state."""
-        try:
-            self.conn.execute(
-                "UPDATE agent_state SET position_size=0, entry_price=0, "
-                "stop_loss=0, take_profit=0, cash_deployed=0, trade_id=NULL, "
-                "last_updated=CURRENT_TIMESTAMP"
-            )
-            self.conn.commit()
-            logger.info("Cleared all positions in database.")
-        except Exception as e:
-            logger.error(f"Error clearing all positions: {e}")
-
-    def get_total_deployed(self) -> float:
-        """Return total cash deployed across all open positions."""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT SUM(cash_deployed) FROM agent_state WHERE position_size != 0")
-            result = cursor.fetchone()
-            return float(result[0] or 0.0)
-        except Exception as e:
-            logger.error(f"Error getting total deployed: {e}")
-            return 0.0
-
-    def get_portfolio_value(self) -> Optional[float]:
-        """Approximate portfolio value = initial capital (mark-to-market not tracked here)."""
-        try:
-            from utils.config import AGENT_INITIAL_CAPITAL
+            NOTIONAL_CAPITAL = 10000.0
             cursor = self.conn.cursor()
             cursor.execute("SELECT COALESCE(SUM(pnl), 0) FROM agent_trades WHERE pnl IS NOT NULL")
             total_pnl = float(cursor.fetchone()[0] or 0.0)
-            return AGENT_INITIAL_CAPITAL + total_pnl
+            return NOTIONAL_CAPITAL + total_pnl
         except Exception as e:
-            logger.error(f"Error computing portfolio value: {e}")
+            logger.error(f"Error computing prediction baseline: {e}")
             return None
-
-    def get_all_positions(self) -> pd.DataFrame:
-        """Return all open positions."""
-        try:
-            return pd.read_sql_query(
-                "SELECT * FROM agent_state WHERE position_size != 0", self.conn
-            )
-        except Exception as e:
-            logger.error(f"Error fetching positions: {e}")
-            return pd.DataFrame()
 
     # ═══════════════════════════════════════════════════════════════════════
     # New: agent_performance helpers (Layer 2 adaptive weights)
@@ -661,6 +697,442 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error fetching monitors: {e}")
             return []
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # New: prediction tracker helpers (virtual trade lifecycle)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def create_prediction_tracker(self, tracker_data: dict) -> int:
+        """
+        Insert a new prediction tracker entry.
+
+        tracker_data should contain:
+          - prediction_id (optional FK link)
+          - source: "agent_loop", "standalone", or "backfill"
+          - symbol
+          - direction: "UP"/"DOWN" or "BUY"/"SELL"/"HOLD"
+          - timeframe: "1m", "5m", "15m", "1h", "4h", "1d"
+          - entry_price
+          - take_profit (optional)
+          - stop_loss (optional)
+          - status (default "ACTIVE")
+          - current_price (optional)
+          - rsi, atr, bb_pos (optional technicals)
+          - ml_confidence, quant_confidence, vote_score (optional)
+          - reasoning (optional)
+          - agent_insights_json (optional JSON string)
+
+        Returns the inserted row id, or -1 on error.
+        Automatically calculates expires_at from timeframe.
+        """
+        try:
+            timeframe = tracker_data.get("timeframe", "1h")
+            timeframe_hours = {
+                "1m": 1, "5m": 2, "15m": 6, "30m": 12,
+                "1h": 24, "4h": 96, "1d": 576, "1w": 1008
+            }
+            hours = timeframe_hours.get(timeframe, 24)
+            now = datetime.now()
+            expires_at = now + timedelta(hours=hours)
+
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT INTO prediction_tracker
+                (prediction_id, source, symbol, direction, timeframe,
+                 entry_price, take_profit, stop_loss, status,
+                 current_price, pnl_percent,
+                 rsi, atr, bb_pos,
+                 ml_confidence, quant_confidence, vote_score,
+                 reasoning, agent_insights_json,
+                 created_at, last_checked_at, expires_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                tracker_data.get("prediction_id"),
+                tracker_data.get("source", "standalone"),
+                tracker_data["symbol"],
+                tracker_data["direction"],
+                timeframe,
+                tracker_data["entry_price"],
+                tracker_data.get("take_profit"),
+                tracker_data.get("stop_loss"),
+                tracker_data.get("status", "ACTIVE"),
+                tracker_data.get("current_price"),
+                tracker_data.get("pnl_percent"),
+                tracker_data.get("rsi"),
+                tracker_data.get("atr"),
+                tracker_data.get("bb_pos"),
+                tracker_data.get("ml_confidence"),
+                tracker_data.get("quant_confidence"),
+                tracker_data.get("vote_score"),
+                tracker_data.get("reasoning"),
+                tracker_data.get("agent_insights_json"),
+                now.isoformat(),
+                now.isoformat(),
+                expires_at.isoformat()
+            ))
+            self.conn.commit()
+            logger.info(f"Created prediction tracker for {tracker_data['symbol']} "
+                        f"(direction={tracker_data['direction']}, expires={expires_at})")
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error creating prediction tracker: {e}")
+            return -1
+
+    def get_active_trackers(self, symbol: str = None) -> pd.DataFrame:
+        """
+        Return all trackers with status='ACTIVE'.
+        Optionally filtered by symbol.
+        """
+        try:
+            if symbol:
+                query = "SELECT * FROM prediction_tracker WHERE status='ACTIVE' AND symbol=? ORDER BY created_at DESC"
+                return pd.read_sql_query(query, self.conn, params=(symbol,))
+            else:
+                query = "SELECT * FROM prediction_tracker WHERE status='ACTIVE' ORDER BY created_at DESC"
+                return pd.read_sql_query(query, self.conn)
+        except Exception as e:
+            logger.error(f"Error fetching active trackers: {e}")
+            return pd.DataFrame()
+
+    def get_tracker_by_id(self, tracker_id: int) -> dict:
+        """Return a single tracker row as a dict."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM prediction_tracker WHERE id=?", (tracker_id,))
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return {}
+        except Exception as e:
+            logger.error(f"Error fetching tracker id={tracker_id}: {e}")
+            return {}
+
+    def get_trackers_by_symbol(self, symbol: str) -> pd.DataFrame:
+        """Return all trackers for a symbol, ordered by created_at DESC."""
+        try:
+            query = "SELECT * FROM prediction_tracker WHERE symbol=? ORDER BY created_at DESC"
+            return pd.read_sql_query(query, self.conn, params=(symbol,))
+        except Exception as e:
+            logger.error(f"Error fetching trackers for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def update_tracker_status(self, tracker_id: int, status: str,
+                              current_price: float = None,
+                              pnl_percent: float = None) -> None:
+        """Update tracker status, current_price, pnl_percent, and last_checked_at."""
+        try:
+            self.conn.execute('''
+                UPDATE prediction_tracker
+                SET status=?, current_price=?, pnl_percent=?, last_checked_at=?
+                WHERE id=?
+            ''', (
+                status,
+                current_price,
+                pnl_percent,
+                datetime.now().isoformat(),
+                tracker_id
+            ))
+            self.conn.commit()
+            logger.info(f"Updated tracker id={tracker_id} status={status}")
+        except Exception as e:
+            logger.error(f"Error updating tracker status for id={tracker_id}: {e}")
+
+    def update_tracker_outcome(self, tracker_id: int, outcome_type: str,
+                               price: float) -> None:
+        """
+        Set outcome fields based on the outcome type.
+
+        outcome_type can be:
+          - 'tp_hit': sets status=WON_TP, tp_hit_at=now, final_price_at_outcome=price
+          - 'sl_hit': sets status=LOST_SL, sl_hit_at=now, final_price_at_outcome=price
+          - 'direction_win': sets status=WON_DIRECTION, direction_check_at=now,
+                             direction_result='WIN', final_price_at_outcome=price
+          - 'direction_loss': sets status=EXPIRED, direction_check_at=now,
+                              direction_result='LOSS', final_price_at_outcome=price
+          - 'expired': sets status=EXPIRED, direction_check_at=now
+        """
+        try:
+            now = datetime.now().isoformat()
+
+            outcome_map = {
+                "tp_hit": (
+                    "WON_TP", price, None, None, now, None, None
+                ),
+                "sl_hit": (
+                    "LOST_SL", None, price, now, None, None, None
+                ),
+                "direction_win": (
+                    "WON_DIRECTION", None, None, None, now, "WIN", price
+                ),
+                "direction_loss": (
+                    "EXPIRED", None, None, None, now, "LOSS", price
+                ),
+                "expired": (
+                    "EXPIRED", None, None, None, now, None, None
+                ),
+            }
+
+            if outcome_type not in outcome_map:
+                logger.error(f"Unknown outcome type: {outcome_type}")
+                return
+
+            (status, tp_hit_at, sl_hit_at, tp_sl_time,
+             direction_check_at, direction_result, final_price) = outcome_map[outcome_type]
+
+            # Build dynamic update based on outcome type
+            if outcome_type == "tp_hit":
+                self.conn.execute('''
+                    UPDATE prediction_tracker
+                    SET status=?, tp_hit_at=?, final_price_at_outcome=?, last_checked_at=?
+                    WHERE id=?
+                ''', (status, tp_hit_at, final_price, now, tracker_id))
+            elif outcome_type == "sl_hit":
+                self.conn.execute('''
+                    UPDATE prediction_tracker
+                    SET status=?, sl_hit_at=?, final_price_at_outcome=?, last_checked_at=?
+                    WHERE id=?
+                ''', (status, sl_hit_at, final_price, now, tracker_id))
+            elif outcome_type in ("direction_win", "direction_loss", "expired"):
+                self.conn.execute('''
+                    UPDATE prediction_tracker
+                    SET status=?, direction_check_at=?, direction_result=?,
+                        final_price_at_outcome=?, last_checked_at=?
+                    WHERE id=?
+                ''', (status, direction_check_at, direction_result, final_price, now, tracker_id))
+
+            self.conn.commit()
+            logger.info(f"Set outcome for tracker id={tracker_id}: {outcome_type}")
+        except Exception as e:
+            logger.error(f"Error updating tracker outcome for id={tracker_id}: {e}")
+
+    def update_tracker_extremes(self, tracker_id: int, current_price: float) -> None:
+        """
+        Update max_profit_reached and max_loss_reached based on current price.
+        Compares current price against entry_price to determine if it's a new high or low.
+        """
+        try:
+            tracker = self.get_tracker_by_id(tracker_id)
+            if not tracker:
+                logger.warning(f"Tracker id={tracker_id} not found for extremes update")
+                return
+
+            entry_price = tracker.get("entry_price")
+            if not entry_price:
+                return
+
+            direction = tracker.get("direction", "")
+            max_profit = tracker.get("max_profit_reached")
+            max_loss = tracker.get("max_loss_reached")
+
+            # For UP/BUY: profit = price goes up, loss = price goes down
+            # For DOWN/SELL: profit = price goes down, loss = price goes up
+            is_bullish = direction in ("UP", "BUY")
+
+            if is_bullish:
+                # Profit when price rises above entry
+                if current_price > entry_price:
+                    if max_profit is None or current_price > max_profit:
+                        max_profit = current_price
+                # Loss when price falls below entry
+                if current_price < entry_price:
+                    if max_loss is None or current_price < max_loss:
+                        max_loss = current_price
+            else:
+                # Profit when price falls below entry (short)
+                if current_price < entry_price:
+                    if max_profit is None or current_price < max_profit:
+                        max_profit = current_price
+                # Loss when price rises above entry (short)
+                if current_price > entry_price:
+                    if max_loss is None or current_price > max_loss:
+                        max_loss = current_price
+
+            self.conn.execute('''
+                UPDATE prediction_tracker
+                SET max_profit_reached=?, max_loss_reached=?,
+                    current_price=?, last_checked_at=?
+                WHERE id=?
+            ''', (max_profit, max_loss, current_price, datetime.now().isoformat(), tracker_id))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating tracker extremes for id={tracker_id}: {e}")
+
+    def log_price_check(self, tracker_id: int, price: float,
+                        pnl: float, status: str) -> None:
+        """Insert a row into price_check_log."""
+        try:
+            self.conn.execute('''
+                INSERT INTO price_check_log
+                (tracker_id, checked_at, price_at_check, pnl_at_check, status_at_check)
+                VALUES (?,?,?,?,?)
+            ''', (tracker_id, datetime.now().isoformat(), price, pnl, status))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Error logging price check for tracker id={tracker_id}: {e}")
+
+    def get_tracker_stats(self, symbol: str = None,
+                          time_range_days: int = None) -> dict:
+        """
+        Calculate win rate statistics for prediction trackers.
+
+        Optionally filtered by symbol and time_range_days.
+        Returns dict with all stats.
+        """
+        try:
+            where_clauses = []
+            params = []
+
+            if symbol:
+                where_clauses.append("symbol=?")
+                params.append(symbol)
+
+            if time_range_days:
+                where_clauses.append("created_at >= datetime('now', ?)")
+                params.append(f"-{time_range_days} days")
+
+            where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+            cursor = self.conn.cursor()
+
+            # Total predictions
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker{where_sql}", params
+            )
+            total = cursor.fetchone()["cnt"]
+
+            # Active count
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker "
+                f"WHERE status='ACTIVE'{where_sql}", params
+            )
+            active = cursor.fetchone()["cnt"]
+
+            # Completed count (WON_* or LOST_*)
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker "
+                f"WHERE status IN ('WON_TP','WON_DIRECTION','LOST_SL'){where_sql}", params
+            )
+            completed = cursor.fetchone()["cnt"]
+
+            # TP hits
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker "
+                f"WHERE status='WON_TP'{where_sql}", params
+            )
+            tp_hits = cursor.fetchone()["cnt"]
+
+            # Directional wins
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker "
+                f"WHERE status='WON_DIRECTION'{where_sql}", params
+            )
+            directional_wins = cursor.fetchone()["cnt"]
+
+            # Completed with direction result
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM prediction_tracker "
+                f"WHERE direction_result IS NOT NULL{where_sql}", params
+            )
+            completed_with_direction = cursor.fetchone()["cnt"]
+
+            # Avg PnL at outcome
+            cursor.execute(
+                f"SELECT AVG(pnl_percent) as avg_pnl FROM prediction_tracker "
+                f"WHERE status IN ('WON_TP','WON_DIRECTION','LOST_SL'){where_sql}", params
+            )
+            avg_pnl_row = cursor.fetchone()
+            avg_pnl = avg_pnl_row["avg_pnl"] if avg_pnl_row else None
+
+            # Avg time to outcome (hours)
+            cursor.execute(
+                f"SELECT AVG(julianday(COALESCE(tp_hit_at, sl_hit_at, direction_check_at)) "
+                f"- julianday(created_at)) * 24 as avg_hours FROM prediction_tracker "
+                f"WHERE status IN ('WON_TP','WON_DIRECTION','LOST_SL'){where_sql}", params
+            )
+            avg_time_row = cursor.fetchone()
+            avg_time = avg_time_row["avg_hours"] if avg_time_row else None
+
+            tp_win_rate = (tp_hits / completed * 100) if completed > 0 else 0
+            directional_accuracy = (directional_wins / completed_with_direction * 100) \
+                if completed_with_direction > 0 else 0
+
+            return {
+                "total_predictions": total,
+                "active_count": active,
+                "completed_count": completed,
+                "tp_hits": tp_hits,
+                "tp_win_rate": round(tp_win_rate, 2),
+                "directional_wins": directional_wins,
+                "directional_accuracy": round(directional_accuracy, 2),
+                "avg_pnl_at_outcome": round(avg_pnl, 4) if avg_pnl else None,
+                "avg_time_to_outcome_hours": round(avg_time, 2) if avg_time else None,
+            }
+        except Exception as e:
+            logger.error(f"Error computing tracker stats: {e}")
+            return {
+                "total_predictions": 0,
+                "active_count": 0,
+                "completed_count": 0,
+                "tp_hits": 0,
+                "tp_win_rate": 0,
+                "directional_wins": 0,
+                "directional_accuracy": 0,
+                "avg_pnl_at_outcome": None,
+                "avg_time_to_outcome_hours": None,
+            }
+
+    def backfill_trackers_from_predictions(self) -> int:
+        """
+        One-time migration: read existing predictions table and create tracker entries
+        for predictions that don't have a corresponding tracker.
+
+        Missing fields (rsi, atr, etc) are left as NULL.
+        source='backfill', timeframe='1h' (default for historical data).
+
+        Returns count of trackers created.
+        """
+        try:
+            cursor = self.conn.cursor()
+
+            # Find predictions without a corresponding tracker
+            cursor.execute('''
+                SELECT p.* FROM predictions p
+                LEFT JOIN prediction_tracker pt ON pt.prediction_id = p.id
+                WHERE pt.id IS NULL
+            ''')
+            rows = cursor.fetchall()
+
+            if not rows:
+                logger.info("No predictions to backfill — all already have trackers.")
+                return 0
+
+            count = 0
+            for row in rows:
+                tracker_data = {
+                    "prediction_id": row["id"],
+                    "source": "backfill",
+                    "symbol": row["symbol"],
+                    "direction": row["action"],
+                    "timeframe": "1h",
+                    "entry_price": row["entry_price"] or 0.0,
+                    "take_profit": row.get("take_profit"),
+                    "stop_loss": row.get("stop_loss"),
+                    "status": "ACTIVE",
+                    "current_price": row.get("current_price"),
+                    "quant_confidence": row.get("quant_confidence"),
+                    "vote_score": row.get("vote_score"),
+                    "reasoning": row.get("cio_memo"),
+                }
+
+                tracker_id = self.create_prediction_tracker(tracker_data)
+                if tracker_id > 0:
+                    count += 1
+
+            logger.info(f"Backfilled {count} trackers from predictions table.")
+            return count
+        except Exception as e:
+            logger.error(f"Error backfilling trackers: {e}")
+            return 0
 
     # ═══════════════════════════════════════════════════════════════════════
     # Connection management

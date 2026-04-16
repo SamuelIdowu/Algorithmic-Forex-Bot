@@ -15,7 +15,6 @@ Data it reads from context (all already present after a full cycle):
     context["risk"][symbol]         — action, vote_score, entry_price,
                                       stop_loss, take_profit, position_size,
                                       weights_used
-    context["portfolio"][symbol]    — executed_action, reason
 """
 from __future__ import annotations
 
@@ -125,7 +124,6 @@ def _build_signal_box(symbol: str, context: dict) -> list[str]:
     sentiment    = context.get("sentiment",    {}).get(symbol, {})
     fundamentals = context.get("fundamentals", {}).get(symbol, {})
     risk         = context.get("risk",         {}).get(symbol, {})
-    portfolio    = context.get("portfolio",    {}).get(symbol, {})
 
     # ── Raw values ────────────────────────────────────────────────────────
     action        = risk.get("action", "HOLD")
@@ -138,8 +136,6 @@ def _build_signal_box(symbol: str, context: dict) -> list[str]:
     q_conf        = quant.get("quant_confidence", 0.0)
     s_signal      = sentiment.get("sentiment_signal",    "—")
     f_signal      = fundamentals.get("fundamentals_signal", "—")
-    ex_action     = portfolio.get("executed_action", "—")
-    ex_reason     = portfolio.get("reason", "")
     weights       = risk.get("weights_used", {})
     ts            = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -187,17 +183,6 @@ def _build_signal_box(symbol: str, context: dict) -> list[str]:
     lines.append(_row(f"  📰 Sentiment    {_signal_color(s_signal):<30}              wt {w_s:.0%}"))
     lines.append(_row(f"  📊 Fundamentals {_signal_color(f_signal):<30}              wt {w_f:.0%}"))
 
-    lines.append(_divider("─"))
-
-    # Executed action
-    ex_label = _GREEN + ex_action + _RESET if "BUY" in ex_action else (
-               _RED + ex_action + _RESET if "SELL" in ex_action or "CLOSE" in ex_action else ex_action)
-    lines.append(_row(f"  ✅ Executed: {ex_label}"))
-    if ex_reason:
-        # Truncate reason so it fits
-        reason_short = ex_reason[:_WIDTH - 16]
-        lines.append(_row(f"     {_DIM}{reason_short}{_RESET}"))
-
     # Low-confidence warning
     if low_conf_warn:
         lines.append(_divider("─"))
@@ -234,9 +219,8 @@ def _build_signal_box(symbol: str, context: dict) -> list[str]:
             lines.append(_row(""))
             lines.append(_row(f"  {_YELLOW}⚠  Low confidence — consider reduced size or skip{_RESET}"))
     else:
-        standby_reason = ex_reason[:_WIDTH - 20] if ex_reason else "signal not strong enough"
         lines.append(_row(f"  {_YELLOW}No trade — stand aside{_RESET}"))
-        lines.append(_row(f"  Reason: {_DIM}{standby_reason}{_RESET}"))
+        lines.append(_row(f"  Reason: {_DIM}signal not strong enough{_RESET}"))
 
     lines.append(_bot())
     return lines

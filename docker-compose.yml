@@ -1,8 +1,7 @@
 version: '3.8'
 
 services:
-  # The AI Hedge Fund Agent Loop
-  # This runs the background cycles for trading
+  # The AI Insights Engine — runs autonomous analysis cycles
   agent:
     build: .
     restart: always
@@ -12,8 +11,7 @@ services:
       - ./models:/app/models
     command: python run_agent.py
 
-  # The Telegram Bot Interaction Layer
-  # This allows you to control the bot via mobile
+  # The Telegram Bot — interactive insights interface
   telegram:
     build: .
     restart: always

@@ -108,14 +108,87 @@ def _auto_train(symbol: str, interval: str, model_path: str, scaler_path: str) -
         return False
 
 
+def _get_agent_insights(symbol: str, interval: str, current_price: float, atr: float) -> dict:
+    """
+    Run multi-agent analysis pipeline to get insights from all analysts.
+    Returns a dict with quant, sentiment, fundamentals, CIO, and risk manager insights.
+    """
+    try:
+        from agents.market_data_analyst import MarketDataAnalyst
+        from agents.quant_analyst import QuantAnalyst
+        from agents.sentiment_analyst import SentimentAnalyst
+        from agents.fundamentals_analyst import FundamentalsAnalyst
+        from agents.chief_investment_officer import ChiefInvestmentOfficer
+        from agents.risk_manager import RiskManager
+
+        # Build context similar to run_agent.py
+        context = {
+            "symbols": [symbol],
+        }
+
+        # Run agents in sequence
+        market_data = MarketDataAnalyst()
+        context = market_data.run(context)
+
+        quant = QuantAnalyst()
+        context = quant.run(context)
+
+        sentiment = SentimentAnalyst()
+        context = sentiment.run(context)
+
+        fundamentals = FundamentalsAnalyst()
+        context = fundamentals.run(context)
+
+        cio = ChiefInvestmentOfficer()
+        context = cio.run(context)
+
+        risk = RiskManager()
+        context = risk.run(context)
+
+        # Extract insights
+        quant_data = context.get("quant", {}).get(symbol, {})
+        sentiment_data = context.get("sentiment", {}).get(symbol, {})
+        fundamentals_data = context.get("fundamentals", {}).get(symbol, {})
+        cio_data = context.get("cio", {}).get(symbol, {})
+        risk_data = context.get("risk", {}).get(symbol, {})
+
+        return {
+            "quant": {
+                "signal": quant_data.get("quant_signal", "N/A"),
+                "confidence": quant_data.get("quant_confidence", 0),
+            },
+            "sentiment": {
+                "signal": sentiment_data.get("sentiment_signal", "N/A"),
+                "score": sentiment_data.get("sentiment_score", 0),
+            },
+            "fundamentals": {
+                "signal": fundamentals_data.get("fundamentals_signal", "N/A"),
+            },
+            "cio": {
+                "signal": cio_data.get("cio_signal", "N/A"),
+                "memo": cio_data.get("memo", ""),
+            },
+            "risk_manager": {
+                "action": risk_data.get("action", "HOLD"),
+                "vote_score": risk_data.get("vote_score", 0),
+                "weights": risk_data.get("weights_used", {}),
+            },
+        }
+    except Exception as e:
+        logger.error(f"[predict] Agent insights failed for {symbol}: {e}")
+        return None
+
+
 def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
     """
     Predict the next movement for a symbol using the trained model.
     If no model exists, automatically triggers training first.
+    Optionally includes multi-agent insights.
     """
     # Extract kwargs
     lookback = kwargs.get('lookback', 100)
     interval = kwargs.get('interval', '1d')
+    include_insights = kwargs.get('include_insights', True)
 
     # Resolve paths — handle interval-suffix mismatch automatically
     model_path, scaler_path = _resolve_model_path(symbol, model_path, scaler_path, interval)
@@ -251,6 +324,30 @@ def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
         'reasoning': f"{direction} signal with {confidence:.1%} confidence. RSI={rsi:.1f}, ATR={atr:.4f}.",
     }
 
+    # Get multi-agent insights (if enabled)
+    if include_insights:
+        try:
+            insights = _get_agent_insights(symbol, interval, entry_price, atr)
+            result['agent_insights'] = insights
+        except Exception as e:
+            logger.warning(f"[predict] Could not fetch agent insights: {e}")
+            result['agent_insights'] = None
+
+    # Log to prediction tracker
+    try:
+        from services.prediction_tracker_service import PredictionTrackerService
+        tracker_service = PredictionTrackerService()
+        tracker_id = tracker_service.create_tracker_from_prediction(
+            prediction_result=result,
+            source="standalone",
+            prediction_id=None  # Will be linked if caller provides it
+        )
+        result['tracker_id'] = tracker_id
+        logger.info(f"[predict] Tracker created for {symbol}: ID={tracker_id}")
+    except Exception as e:
+        logger.warning(f"[predict] Could not create tracker entry: {e}")
+        result['tracker_id'] = None
+
     return result
 
 
@@ -338,6 +435,64 @@ def print_prediction(result):
     if conf < 0.60:
         lines.append(div_da)
         lines.append(row(f"  ⚠️  {_YEL}LOW CONFIDENCE — treat as indicative only{_RST}"))
+
+    # ── Agent Insights Section ────────────────────────────────────────────
+    insights = result.get('agent_insights')
+    if insights:
+        lines.append(div_eq)
+        lines.append(row(f"{_BOLD}{_CYN}  AI AGENT INSIGHTS{_RST}"))
+        lines.append(div_da)
+
+        # Quant Analyst
+        quant = insights.get("quant", {})
+        q_signal = quant.get("signal", "N/A")
+        q_conf = quant.get("confidence", 0)
+        q_color = _GRN if q_signal == "BUY" else (_RED if q_signal == "SELL" else _YEL)
+        lines.append(row(f"  🤖 Quant        │ {q_color}{_BOLD}{q_signal:<6}{_RST}  conf {_conf_bar(q_conf, 8)}"))
+
+        # Sentiment Analyst
+        sentiment = insights.get("sentiment", {})
+        s_signal = sentiment.get("signal", "N/A")
+        s_score = sentiment.get("score", 0)
+        s_color = _GRN if "BULL" in s_signal.upper() else (_RED if "BEAR" in s_signal.upper() else _YEL)
+        lines.append(row(f"  📰 Sentiment    │ {s_color}{_BOLD}{s_signal:<6}{_RST}  score {s_score:.3f}"))
+
+        # Fundamentals Analyst
+        fundamentals = insights.get("fundamentals", {})
+        f_signal = fundamentals.get("signal", "N/A")
+        f_color = _GRN if "BULL" in f_signal.upper() else (_RED if "BEAR" in f_signal.upper() else _YEL)
+        lines.append(row(f"  📊 Fundamentals │ {f_color}{_BOLD}{f_signal:<6}{_RST}"))
+
+        # CIO
+        cio = insights.get("cio", {})
+        cio_signal = cio.get("signal", "N/A")
+        cio_memo = cio.get("memo", "")
+        c_color = _GRN if "BULL" in cio_signal.upper() else (_RED if "BEAR" in cio_signal.upper() else _YEL)
+        lines.append(row(f"  🎯 CIO          │ {c_color}{_BOLD}{cio_signal:<6}{_RST}"))
+
+        if cio_memo:
+            lines.append(div_da)
+            # Wrap memo to fit box
+            import textwrap
+            memo_lines = textwrap.wrap(cio_memo, width=W - 16)
+            lines.append(row(f"  {_BOLD}CIO Memo:{_RST}"))
+            for memo_line in memo_lines[:3]:  # Show max 3 lines
+                lines.append(row(f"    {_DIM}{memo_line}{_RST}"))
+            if len(memo_lines) > 3:
+                lines.append(row(f"    {_DIM}...{_RST}"))
+
+        # Risk Manager
+        risk = insights.get("risk_manager", {})
+        r_action = risk.get("action", "HOLD")
+        r_score = risk.get("vote_score", 0)
+        r_color = _GRN if r_action == "BUY" else (_RED if r_action == "SELL" else _YEL)
+        lines.append(div_da)
+        lines.append(row(f"  ⚖️  Risk Mgr     │ {r_color}{_BOLD}{r_action:<6}{_RST}  score {r_score:.3f}"))
+
+        # Analyst Weights
+        weights = risk.get("weights", {})
+        if weights:
+            lines.append(row(f"    {_DIM}Weights: Q:{weights.get('quant', 0):.0%} S:{weights.get('sentiment', 0):.0%} F:{weights.get('fundamentals', 0):.0%}{_RST}"))
 
     lines += [bot, ""]
     print("\n".join(lines))
