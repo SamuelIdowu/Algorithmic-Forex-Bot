@@ -1,5 +1,5 @@
 # Dockerfile for Algo Bot
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Install system dependencies for TA-Lib and other Python extensions
 RUN apt-get update && apt-get install -y \
@@ -20,20 +20,23 @@ RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
     cd .. && \
     rm -rf ta-lib*
 
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 # Set working directory
 WORKDIR /app
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project files
 COPY . .
 
+# Install Python dependencies using uv
+RUN uv sync --frozen --no-dev
+
 # Ensure entrypoint is executable
 RUN chmod +x entrypoint.sh
+
+# Use uv run for better dependency awareness
+ENV UV_COMPILE_BYTECODE=1
 
 # Default environment variables
 ENV PYTHONUNBUFFERED=1

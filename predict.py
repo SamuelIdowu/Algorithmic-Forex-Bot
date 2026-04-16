@@ -333,6 +333,21 @@ def predict_next_movement(symbol, model_path, scaler_path, **kwargs):
             logger.warning(f"[predict] Could not fetch agent insights: {e}")
             result['agent_insights'] = None
 
+    # Log to prediction tracker
+    try:
+        from services.prediction_tracker_service import PredictionTrackerService
+        tracker_service = PredictionTrackerService()
+        tracker_id = tracker_service.create_tracker_from_prediction(
+            prediction_result=result,
+            source="standalone",
+            prediction_id=None  # Will be linked if caller provides it
+        )
+        result['tracker_id'] = tracker_id
+        logger.info(f"[predict] Tracker created for {symbol}: ID={tracker_id}")
+    except Exception as e:
+        logger.warning(f"[predict] Could not create tracker entry: {e}")
+        result['tracker_id'] = None
+
     return result
 
 

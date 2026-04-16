@@ -61,13 +61,28 @@ git clone <repository-url>
 cd algo_trader
 ```
 
-### 2. Setup Environment (Conda)
-```bash
-# Create the environment from the file
-conda env create -f environment.yml
+### 2. Setup Environment (uv)
 
-# Activate the environment
-conda activate algo_trader
+First, install uv if you haven't already:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then create and activate the virtual environment:
+```bash
+# Create virtual environment and install dependencies
+uv sync
+
+# The virtual environment is automatically managed by uv
+# When running commands, use `uv run` prefix:
+uv run python main.py
+```
+
+Alternatively, you can activate the shell:
+```bash
+source .venv/bin/activate  # On Linux/Mac
+# or
+.venv\Scripts\activate     # On Windows
 ```
 
 ### 3. Configure API Keys

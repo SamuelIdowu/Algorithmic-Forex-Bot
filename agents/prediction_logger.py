@@ -12,6 +12,7 @@ Output: context["prediction_log"][symbol] = {
     "take_profit": float,
     "vote_score": float,
     "logged_id": int,
+    "tracker_id": int,
 }
 """
 import logging
@@ -70,6 +71,59 @@ class PredictionLogger(BaseAgent):
                     current_price=market.get(symbol, {}).get("latest_close", 0),
                 )
 
+                # Create prediction tracker entry
+                tracker_id = None
+                try:
+                    from services.prediction_tracker_service import PredictionTrackerService
+                    tracker_service = PredictionTrackerService()
+
+                    # Build prediction result dict from agent context
+                    prediction_result = {
+                        "symbol": symbol,
+                        "prediction": quant.get(symbol, {}).get("quant_signal", ""),  # BUY/SELL/HOLD
+                        "action": action,
+                        "entry": r.get("entry_price", 0),
+                        "tp": r.get("take_profit", 0),
+                        "sl": r.get("stop_loss", 0),
+                        "confidence": quant.get(symbol, {}).get("quant_confidence", 0),
+                        "rsi": market.get(symbol, {}).get("rsi", 0),
+                        "atr": market.get(symbol, {}).get("atr", 0),
+                        "bb_pos": market.get(symbol, {}).get("bb_position", 0.5),
+                        "reasoning": cio.get(symbol, {}).get("memo", ""),
+                        "interval": context.get("interval", "1h"),  # Get from context
+                        "agent_insights": {
+                            "quant": {
+                                "signal": quant.get(symbol, {}).get("quant_signal", ""),
+                                "confidence": quant.get(symbol, {}).get("quant_confidence", 0),
+                            },
+                            "sentiment": {
+                                "signal": sentiment.get(symbol, {}).get("sentiment_signal", ""),
+                                "score": sentiment.get(symbol, {}).get("sentiment_score", 0),
+                            },
+                            "fundamentals": {
+                                "signal": fundamentals.get(symbol, {}).get("fundamentals_signal", ""),
+                            },
+                            "cio": {
+                                "signal": cio.get(symbol, {}).get("cio_signal", ""),
+                                "memo": cio.get(symbol, {}).get("memo", ""),
+                            },
+                            "risk_manager": {
+                                "action": action,
+                                "vote_score": r.get("vote_score", 0),
+                                "weights": r.get("weights_used", {}),
+                            },
+                        },
+                    }
+
+                    tracker_id = tracker_service.create_tracker_from_prediction(
+                        prediction_result=prediction_result,
+                        source="agent_loop",
+                        prediction_id=logged_id
+                    )
+                    logger.info(f"[PredictionLogger] Tracker created for {symbol}: ID={tracker_id}")
+                except Exception as tracker_err:
+                    logger.error(f"[PredictionLogger] Tracker creation failed for {symbol}: {tracker_err}")
+
                 prediction_log[symbol] = {
                     "action":      action,
                     "entry_price": r.get("entry_price", 0),
@@ -77,6 +131,7 @@ class PredictionLogger(BaseAgent):
                     "take_profit": r.get("take_profit", 0),
                     "vote_score":  r.get("vote_score", 0),
                     "logged_id":   logged_id,
+                    "tracker_id":  tracker_id,
                 }
 
                 # ── Telegram alert for actionable signals ──────────────────
@@ -89,7 +144,8 @@ class PredictionLogger(BaseAgent):
                         f"SL: {r.get('stop_loss', 0):.2f} | TP: {r.get('take_profit', 0):.2f}\n"
                         f"Score: {r.get('vote_score', 0):.2f}\n"
                         f"Confidence: {quant.get(symbol, {}).get('quant_confidence', 0):.1%}\n"
-                        f"Memo: {cio_memo}"
+                        f"Memo: {cio_memo}\n"
+                        f"Tracker ID: #{tracker_id}"
                     )
                     send_telegram_message_sync(msg)
 
@@ -104,6 +160,7 @@ class PredictionLogger(BaseAgent):
                     "action": "ERROR",
                     "entry_price": 0, "stop_loss": 0, "take_profit": 0,
                     "vote_score": 0, "logged_id": None,
+                    "tracker_id": None,
                 }
 
         context["prediction_log"] = prediction_log

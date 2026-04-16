@@ -8,6 +8,7 @@ from telegram.request import HTTPXRequest
 
 import utils.config as config
 from data.db_manager import DatabaseManager
+from services.prediction_tracker_service import PredictionTrackerService, format_symbol
 from agents.chief_investment_officer import ChiefInvestmentOfficer
 from agents.sentiment_analyst import SentimentAnalyst
 from agents.registry import discover_agents
@@ -33,6 +34,7 @@ class AlgoTelegramBot:
         self.db = DatabaseManager()
         self.cio = ChiefInvestmentOfficer()
         self.sentiment_bot = SentimentAnalyst()
+        self.prediction_tracker_service = PredictionTrackerService(self.db)
         # Lazily setup Groq for chat if needed
         self._groq_client = None
 
@@ -950,6 +952,408 @@ class AlgoTelegramBot:
             key = data.replace('conf_set_', '')
             await self.config_set_prompt(update, context, key)
 
+    async def my_predictions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all active predictions."""
+        symbol = None
+        if context.args:
+            symbol = " ".join(context.args).strip().upper()
+
+        try:
+            summary = self.prediction_tracker_service.get_active_predictions_summary(symbol)
+            if not summary or "No active predictions" in summary:
+                await update.message.reply_text(
+                    "\U0001F4C8 <b>No active predictions found.</b>\n"
+                    "Use /predict to create a new prediction tracker."
+                )
+            else:
+                await update.message.reply_text(summary, parse_mode=None)
+        except Exception as e:
+            logger.error(f"Error in /my_predictions: {e}")
+            await update.message.reply_text("\u274C <b>Failed to fetch predictions.</b>\nPlease try again later.")
+
+    async def check_prediction(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Check current price for a symbol's prediction."""
+        if not context.args:
+            await update.message.reply_text(
+                "\U0001F4DD <b>Usage:</b> <code>/check EUR/USD</code>\n"
+                "Shows the most recent active prediction for that symbol with live price.",
+                parse_mode='HTML'
+            )
+            return
+
+        symbol = " ".join(context.args).strip().upper()
+
+        try:
+            trackers_df = self.db.get_active_trackers(symbol)
+            if trackers_df.empty:
+                await update.message.reply_text(
+                    f"\U0001F4C8 <b>No active predictions for {symbol}.</b>\n"
+                    "Use /predict to create a new prediction."
+                )
+                return
+
+            most_recent = trackers_df.iloc[0]
+            tracker_id = most_recent["id"]
+
+            result = self.prediction_tracker_service.check_prediction(tracker_id)
+            status_text = self.prediction_tracker_service.get_prediction_status_text(tracker_id)
+
+            if result.get("current_price") is None and result.get("outcome") == "PRICE_FETCH_FAILED":
+                await update.message.reply_text(
+                    f"\u2753 <b>Could not fetch live price for {symbol}.</b>\n"
+                    "The market may be closed or the API is unavailable."
+                )
+                return
+
+            await update.message.reply_text(status_text)
+        except Exception as e:
+            logger.error(f"Error in /check: {e}")
+            await update.message.reply_text("\u274C <b>Failed to check prediction.</b>\nPlease try again later.")
+
+    async def prediction_detail(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show details of a specific prediction tracker."""
+        if not context.args:
+            await update.message.reply_text(
+                "\U0001F4DD <b>Usage:</b> <code>/prediction_detail &lt;id&gt;</code>\n"
+                "Example: <code>/prediction_detail 42</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            tracker_id = int(context.args[0])
+        except (ValueError, IndexError):
+            await update.message.reply_text("\u274C <b>Invalid tracker ID.</b>\nPlease provide a numeric ID.")
+            return
+
+        try:
+            tracker = self.db.get_tracker_by_id(tracker_id)
+            if not tracker:
+                await update.message.reply_text(f"\u274C <b>Tracker #{tracker_id} not found.</b>")
+                return
+
+            symbol = tracker["symbol"]
+            status = tracker["status"]
+            direction = tracker["direction"]
+            timeframe = tracker["timeframe"]
+            entry = tracker["entry_price"]
+            tp = tracker.get("take_profit")
+            sl = tracker.get("stop_loss")
+            current = tracker.get("current_price")
+            pnl = tracker.get("pnl_percent")
+            max_profit = tracker.get("max_profit_reached")
+            max_loss = tracker.get("max_loss_reached")
+            created_at = tracker.get("created_at", "")
+            expires_at_str = tracker.get("expires_at")
+            rsi = tracker.get("rsi")
+            atr = tracker.get("atr")
+            bb_pos = tracker.get("bb_pos")
+            ml_conf = tracker.get("ml_confidence")
+            quant_conf = tracker.get("quant_confidence")
+            vote_score = tracker.get("vote_score")
+            reasoning = tracker.get("reasoning", "")
+            agent_insights_json = tracker.get("agent_insights_json")
+            direction_result = tracker.get("direction_result")
+
+            dir_emoji = "\U0001F680" if direction in ("UP", "BUY") else "\U0001F4C9"
+
+            lines = [
+                f"{dir_emoji} <b>Tracker #{tracker_id} Detail</b>",
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+                f"<b>Symbol:</b> <code>{symbol}</code>",
+                f"<b>Status:</b> <code>{status}</code>",
+                f"<b>Direction:</b> {direction} | <b>Timeframe:</b> <code>{timeframe}</code>",
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+                f"<b>Entry:</b> <code>${entry:.4f}</code>",
+            ]
+
+            if tp is not None:
+                lines.append(f"<b>Take Profit:</b> <code>${tp:.4f}</code>")
+            if sl is not None:
+                lines.append(f"<b>Stop Loss:</b> <code>${sl:.4f}</code>")
+
+            if current is not None:
+                pnl_sign = "+" if pnl and pnl >= 0 else ""
+                pnl_str = f"{pnl_sign}{pnl:.2f}%" if pnl is not None else "N/A"
+                lines.append(f"<b>Current Price:</b> <code>${current:.4f}</code>")
+                lines.append(f"<b>PnL:</b> <code>{pnl_str}</code>")
+            else:
+                lines.append("<b>Current Price:</b> N/A")
+
+            if max_profit is not None:
+                lines.append(f"<b>Max Profit Reached:</b> <code>${max_profit:.4f}</code>")
+            if max_loss is not None:
+                lines.append(f"<b>Max Loss Reached:</b> <code>${max_loss:.4f}</code>")
+
+            if direction_result:
+                lines.append(f"<b>Direction Result:</b> <code>{direction_result}</code>")
+
+            # Time info
+            if created_at:
+                lines.append(f"<b>Created:</b> <code>{created_at[:19]}</code>")
+            if expires_at_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    delta = expires_at - datetime.now()
+                    if delta.total_seconds() > 0:
+                        hours = int(delta.total_seconds() // 3600)
+                        minutes = int((delta.total_seconds() % 3600) // 60)
+                        if hours > 0:
+                            lines.append(f"<b>Expires in:</b> <code>{hours}h {minutes}m</code>")
+                        else:
+                            lines.append(f"<b>Expires in:</b> <code>{minutes}m</code>")
+                    else:
+                        lines.append("<b>Status:</b> \u23F0 <code>Expired</code>")
+                except (ValueError, TypeError):
+                    pass
+
+            # Technical indicators at prediction time
+            tech_lines = []
+            if rsi is not None:
+                rsi_desc = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+                tech_lines.append(f"RSI: <code>{rsi:.1f}</code> ({rsi_desc})")
+            if atr is not None:
+                tech_lines.append(f"ATR: <code>{atr:.2f}</code>")
+            if bb_pos is not None:
+                tech_lines.append(f"BB Pos: <code>{bb_pos:.2f}</code>")
+
+            if tech_lines:
+                lines.append("\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501")
+                lines.append("\U0001F4CA <b>Technicals at Prediction:</b>")
+                lines.extend(tech_lines)
+
+            # Confidence scores
+            conf_lines = []
+            if ml_conf is not None:
+                conf_lines.append(f"ML Confidence: <code>{ml_conf:.1%}</code>")
+            if quant_conf is not None:
+                conf_lines.append(f"Quant Confidence: <code>{quant_conf:.1%}</code>")
+            if vote_score is not None:
+                conf_lines.append(f"Vote Score: <code>{vote_score:.3f}</code>")
+
+            if conf_lines:
+                lines.append("\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501")
+                lines.append("\U0001F9E0 <b>Confidence Scores:</b>")
+                lines.extend(conf_lines)
+
+            # Agent insights summary
+            if agent_insights_json:
+                try:
+                    insights = json.loads(agent_insights_json)
+                    insight_lines = []
+                    quant = insights.get("quant", {})
+                    if quant:
+                        insight_lines.append(
+                            f"Quant: <code>{quant.get('signal', 'N/A')}</code> ({quant.get('confidence', 0):.1%})"
+                        )
+                    sentiment = insights.get("sentiment", {})
+                    if sentiment:
+                        insight_lines.append(
+                            f"Sentiment: <code>{sentiment.get('signal', 'N/A')}</code> ({sentiment.get('score', 0):.3f})"
+                        )
+                    fundamentals = insights.get("fundamentals", {})
+                    if fundamentals:
+                        insight_lines.append(
+                            f"Fundamentals: <code>{fundamentals.get('signal', 'N/A')}</code>"
+                        )
+                    cio = insights.get("cio", {})
+                    if cio:
+                        insight_lines.append(
+                            f"CIO: <code>{cio.get('signal', 'N/A')}</code>"
+                        )
+                    risk = insights.get("risk_manager", {})
+                    if risk:
+                        weights = risk.get("weights", {})
+                        w_str = ""
+                        if weights:
+                            w_str = f" | Weights: Q:{weights.get('quant', 0):.0%} S:{weights.get('sentiment', 0):.0%} F:{weights.get('fundamentals', 0):.0%}"
+                        insight_lines.append(
+                            f"Risk Mgr: <code>{risk.get('action', 'HOLD')}</code> ({risk.get('vote_score', 0):.3f}){w_str}"
+                        )
+
+                    if insight_lines:
+                        lines.append("\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501")
+                        lines.append("\U0001F916 <b>Agent Insights:</b>")
+                        lines.extend(insight_lines)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Reasoning / CIO Memo
+            if reasoning:
+                lines.append("\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501")
+                memo_preview = reasoning[:200] + ("..." if len(reasoning) > 200 else "")
+                lines.append(f"\U0001F4DD <b>Reasoning:</b>\n<i>{memo_preview}</i>")
+
+            text = "\n".join(lines)
+            await update.message.reply_text(text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Error in /prediction_detail: {e}")
+            await update.message.reply_text("\u274C <b>Failed to fetch tracker details.</b>\nPlease try again later.")
+
+    async def win_rate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show win rate statistics."""
+        symbol = None
+        if context.args:
+            symbol = " ".join(context.args).strip().upper()
+
+        try:
+            stats = self.db.get_tracker_stats(symbol, time_range_days=30)
+
+            if stats["total_predictions"] == 0:
+                msg = f"\U0001F4C8 <b>No prediction data found.</b>"
+                if symbol:
+                    msg += f"\nNo trackers for {symbol}."
+                else:
+                    msg += "\nNo prediction trackers exist yet."
+                await update.message.reply_text(msg)
+                return
+
+            total = stats["total_predictions"]
+            active = stats["active_count"]
+            completed = stats["completed_count"]
+            tp_rate = stats["tp_win_rate"]
+            dir_acc = stats["directional_accuracy"]
+            avg_pnl = stats["avg_pnl_at_outcome"]
+            avg_time = stats["avg_time_to_outcome_hours"]
+
+            tp_hits = stats["tp_hits"]
+            dir_wins = stats["directional_wins"]
+
+            lines = [
+                "\U0001F4CA <b>Win Rate Statistics</b> (Last 30 Days)",
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+            ]
+
+            if symbol:
+                lines.append(f"<b>Symbol:</b> <code>{symbol}</code>")
+
+            lines.append("")
+            lines.append("<b>Overall:</b>")
+            lines.append(f"Total Predictions: <code>{total}</code>")
+            lines.append(f"Active: <code>{active}</code>")
+            lines.append(f"Completed: <code>{completed}</code>")
+            lines.append("")
+
+            if completed > 0:
+                lines.append(f"TP Hit Rate: <code>{tp_rate:.0f}%</code> ({tp_hits}/{completed})")
+            if stats.get("directional_accuracy") is not None:
+                lines.append(f"Directional Accuracy: <code>{dir_acc:.0f}%</code> ({dir_wins} wins)")
+
+            if avg_pnl is not None:
+                pnl_sign = "+" if avg_pnl >= 0 else ""
+                lines.append(f"Avg P&L at Outcome: <code>{pnl_sign}{avg_pnl:.1f}%</code>")
+            if avg_time is not None:
+                lines.append(f"Avg Time to Outcome: <code>{avg_time:.1f} hours</code>")
+
+            text = "\n".join(lines)
+            await update.message.reply_text(text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Error in /win_rate: {e}")
+            await update.message.reply_text("\u274C <b>Failed to fetch win rate statistics.</b>\nPlease try again later.")
+
+    async def trackers_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show tracker dashboard summary."""
+        try:
+            overall_stats = self.db.get_tracker_stats()
+            active_df = self.db.get_active_trackers()
+            active_count = len(active_df) if not active_df.empty else 0
+
+            # This week stats (7 days)
+            week_stats = self.db.get_tracker_stats(time_range_days=7)
+            week_completed = week_stats["completed_count"]
+            week_tp = week_stats["tp_hits"]
+            week_dir_wins = week_stats["directional_wins"]
+            week_losses = week_completed - week_tp - week_dir_wins
+            week_win_rate = 0
+            if week_completed > 0:
+                week_win_rate = ((week_tp + week_dir_wins) / week_completed) * 100
+
+            # Per-symbol breakdown for last 7 days
+            try:
+                cursor = self.db.conn.cursor()
+                cursor.execute('''
+                    SELECT symbol,
+                           COUNT(*) as total,
+                           SUM(CASE WHEN status IN ('WON_TP', 'WON_DIRECTION') THEN 1 ELSE 0 END) as wins
+                    FROM prediction_tracker
+                    WHERE created_at >= datetime('now', '-7 days')
+                      AND status IN ('WON_TP', 'WON_DIRECTION', 'LOST_SL', 'EXPIRED')
+                    GROUP BY symbol
+                    ORDER BY wins * 1.0 / NULLIF(COUNT(*), 0) DESC
+                    LIMIT 10
+                ''')
+                symbol_rows = cursor.fetchall()
+                symbol_stats_list = []
+                for row in symbol_rows:
+                    sym = row["symbol"]
+                    sym_total = row["total"]
+                    sym_wins = row["wins"]
+                    sym_rate = (sym_wins / sym_total * 100) if sym_total > 0 else 0
+                    symbol_stats_list.append((sym, sym_rate, sym_wins, sym_total))
+            except Exception as e:
+                logger.error(f"Error fetching per-symbol stats: {e}")
+                symbol_stats_list = []
+
+            # Recent outcomes
+            try:
+                cursor.execute('''
+                    SELECT id, symbol, status, pnl_percent
+                    FROM prediction_tracker
+                    WHERE status IN ('WON_TP', 'WON_DIRECTION', 'LOST_SL', 'EXPIRED')
+                    ORDER BY COALESCE(tp_hit_at, sl_hit_at, direction_check_at, created_at) DESC
+                    LIMIT 5
+                ''')
+                recent_rows = cursor.fetchall()
+                recent_lines = []
+                for row in recent_rows:
+                    tid = row["id"]
+                    sym = row["symbol"]
+                    status = row["status"]
+                    pnl = row["pnl_percent"]
+                    if status in ("WON_TP", "WON_DIRECTION"):
+                        emoji = "\u2705"
+                        status_label = status.replace("_", "_")
+                    else:
+                        emoji = "\u274C"
+                        status_label = status.replace("_", "_")
+                    pnl_str = f" {pnl:+.1f}%" if pnl is not None else ""
+                    recent_lines.append(f"{emoji} #{tid} {sym} <code>{status_label}</code>{pnl_str}")
+            except Exception as e:
+                logger.error(f"Error fetching recent outcomes: {e}")
+                recent_lines = ["<i>No recent outcomes available.</i>"]
+
+            # Build dashboard text
+            medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
+            top_lines = []
+            for i, (sym, rate, wins, total) in enumerate(symbol_stats_list[:3]):
+                medal = medals[i] if i < 3 else "  "
+                top_lines.append(f"{medal} {sym}: <code>{rate:.0f}%</code> ({wins}/{total})")
+
+            if not top_lines:
+                top_lines.append("<i>Insufficient data for rankings.</i>")
+
+            lines = [
+                "\U0001F4C8 <b>Prediction Tracker Dashboard</b>",
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+                f"Active Predictions: <code>{active_count}</code>",
+                f"Won This Week: <code>{week_tp + week_dir_wins}</code>",
+                f"Lost This Week: <code>{max(0, week_losses)}</code>",
+                f"Win Rate (7d): <code>{week_win_rate:.0f}%</code>",
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
+                "<b>Top Performers (7d):</b>",
+            ]
+            lines.extend(top_lines)
+
+            lines.append("")
+            lines.append("<b>Recent Outcomes:</b>")
+            lines.extend(recent_lines)
+
+            text = "\n".join(lines)
+            await update.message.reply_text(text, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Error in /trackers_summary: {e}")
+            await update.message.reply_text("\u274C <b>Failed to fetch dashboard summary.</b>\nPlease try again later.")
+
     async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Display help message."""
         query = update.callback_query
@@ -969,6 +1373,12 @@ class AlgoTelegramBot:
             "\u2022 /predict - ML-driven market forecasting\n"
             "\u2022 /tp - Automated Train-to-Predict pipeline\n"
             "\u2022 /monitor - Set periodic intelligence alerts\n\n"
+            "<b>Prediction Tracking</b>\n"
+            "\u2022 /my_predictions [<code>&lt;sym&gt;</code>] - View active predictions\n"
+            "\u2022 /check <code>&lt;sym&gt;</code> - Live price vs prediction\n"
+            "\u2022 /prediction_detail <code>&lt;id&gt;</code> - Full tracker details\n"
+            "\u2022 /win_rate [<code>&lt;sym&gt;</code>] - Win rate statistics\n"
+            "\u2022 /trackers_summary - Dashboard overview\n\n"
             "<b>Fund Management</b>\n"
             "\u2022 /monitors - List your active monitors\n"
             "\u2022 /stopmonitor <code>&lt;sym&gt;</code> - End surveillance\n"
@@ -1027,6 +1437,14 @@ def setup_application():
         app.add_handler(CommandHandler("dashboard", bot.dashboard_cmd))
     if hasattr(bot, 'list_symbols_cmd'):
         app.add_handler(CommandHandler("list_symbols", bot.list_symbols_cmd))
+
+    # New tracker commands
+    app.add_handler(CommandHandler("my_predictions", bot.my_predictions))
+    app.add_handler(CommandHandler("check", bot.check_prediction))
+    app.add_handler(CommandHandler("prediction_detail", bot.prediction_detail))
+    app.add_handler(CommandHandler("win_rate", bot.win_rate))
+    app.add_handler(CommandHandler("trackers_summary", bot.trackers_summary))
+
     app.add_handler(CommandHandler("help", bot.help_cmd))
 
     # Setup background monitoring loop

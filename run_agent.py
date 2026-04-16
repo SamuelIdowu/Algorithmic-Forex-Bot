@@ -60,6 +60,47 @@ def run_cycle(symbols: list[str], disabled: list[str]) -> dict:
     that new agent files added to disk are picked up without restart.
     """
     logger.info(f"─── Cycle START — {datetime.utcnow().isoformat()}")
+
+    # ── Update active prediction trackers before new analysis ──────────
+    try:
+        from services.prediction_tracker_service import PredictionTrackerService
+        tracker_service = PredictionTrackerService()
+
+        # Check and update all active trackers
+        update_result = tracker_service.update_all_active_trackers()
+        if update_result.get("total_checked", 0) > 0:
+            outcomes = update_result.get("outcomes_found", {})
+            logger.info(
+                f"[Tracker] Updated {update_result['total_checked']} active trackers | "
+                f"TP hits: {outcomes.get('tp_hits', 0)}, "
+                f"SL hits: {outcomes.get('sl_hits', 0)}, "
+                f"unchanged: {outcomes.get('unchanged', 0)}"
+            )
+
+            # Send Telegram alert if any TP/SL hit
+            if outcomes.get("tp_hits", 0) > 0 or outcomes.get("sl_hits", 0) > 0:
+                try:
+                    from utils.telegram_utils import send_telegram_message_sync
+                    msg_parts = ["🎯 <b>Prediction Tracker Updates</b>"]
+                    if outcomes.get("tp_hits", 0) > 0:
+                        msg_parts.append(f"✅ {outcomes['tp_hits']} prediction(s) hit TP!")
+                    if outcomes.get("sl_hits", 0) > 0:
+                        msg_parts.append(f"❌ {outcomes['sl_hits']} prediction(s) hit SL")
+                    send_telegram_message_sync("\n".join(msg_parts))
+                except Exception as alert_err:
+                    logger.warning(f"[Tracker] Could not send Telegram alert: {alert_err}")
+
+        # Evaluate any expired trackers
+        expired_result = tracker_service.evaluate_expired_trackers()
+        if expired_result.get("evaluated_count", 0) > 0:
+            logger.info(
+                f"[Tracker] Evaluated {expired_result['evaluated_count']} expired trackers | "
+                f"Directional wins: {expired_result.get('directional_wins', 0)}, "
+                f"losses: {expired_result.get('directional_losses', 0)}"
+            )
+    except Exception as tracker_err:
+        logger.warning(f"[Tracker] Price check cycle failed: {tracker_err}")
+
     agents = discover_agents(disabled=disabled)
 
     context: dict = {

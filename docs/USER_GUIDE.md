@@ -8,8 +8,7 @@
 
 ```bash
 cd "algo_trader"
-conda activate algo_trader
-pip install -r requirements.txt      # installs schedule, vaderSentiment, streamlit, plotly, etc.
+uv sync  # install all dependencies
 ```
 
 ---
