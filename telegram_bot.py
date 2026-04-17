@@ -251,9 +251,9 @@ class AlgoTelegramBot:
                     f"<b>Direction:</b> {emoji} <code>{res['prediction']}</code>\n"
                     f"<b>Confidence:</b> <code>{res['confidence']:.1%}</code>\n"
                     "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-                    f"<b>Entry Price:</b> <code>${res['current_price']:.2f}</code>\n"
-                    f"<b>Target (TP):</b> <code>${res['tp']:.2f}</code>\n"
-                    f"<b>Stop (SL):</b>   <code>${res['sl']:.2f}</code>\n"
+                    f"<b>Entry Price:</b> <code>{config.format_price(res['current_price'])}</code>\n"
+                    f"<b>Target (TP):</b> <code>{config.format_price(res['tp'])}</code>\n"
+                    f"<b>Stop (SL):</b>   <code>{config.format_price(res['sl'])}</code>\n"
                     f"<b>R/R Ratio:</b>  <code>{rr_ratio:.2f}</code>\n"
                 )
 
@@ -452,7 +452,7 @@ class AlgoTelegramBot:
 
                 rows.append(
                     f"{sig_emoji} <b>{symbol}</b> <code>{action}</code> <i>({time_str})</i>\n"
-                    f"   Entry: <code>${entry:.2f}</code> | TP: <code>${tp:.2f}</code> | SL: <code>${sl:.2f}</code>{pnl_str}\n"
+                    f"   Entry: <code>{config.format_price(entry)}</code> | TP: <code>{config.format_price(tp)}</code> | SL: <code>{config.format_price(sl)}</code>{pnl_str}\n"
                     f"   Score: <code>{score:.3f}</code> | Conf: <code>{conf:.1%}</code>\n"
                     f"   <i>{memo}...</i>" if memo else ""
                 )
@@ -556,11 +556,11 @@ class AlgoTelegramBot:
                 rec_size = (val * risk_pct) / (atr * sl_mult) if atr > 0 else 0
 
                 tech_text = (
-                    f"\U0001F52E <b>Forecast:</b> {emoji} <code>{pred_res['prediction']}</code> ({pred_res['confidence']:.1%})\n"
-                    f"\U0001F4CA <b>Technicals:</b> RSI: <code>{rsi_val:.1f}</code> ({rsi_desc}) | ATR: <code>{atr:.2f}</code>\n"
-                    f"\U0001F4C8 <b>Levels:</b> Entry: <code>${pred_res['current_price']:.2f}</code> | TP: <code>${pred_res['tp']:.2f}</code>\n"
-                    f"\U0001F4B0 <b>Rec. Size:</b> <code>{rec_size:.4f}</code> (1% Risk)\n"
-                    "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+                    f"🔮 <b>Forecast:</b> {emoji} <code>{pred_res['prediction']}</code> ({pred_res['confidence']:.1%})\n"
+                    f"📊 <b>Technicals:</b> RSI: <code>{rsi_val:.1f}</code> ({rsi_desc}) | ATR: <code>{atr:.4f}</code>\n"
+                    f"📈 <b>Levels:</b> Entry: <code>{config.format_price(pred_res['current_price'])}</code> | TP: <code>{config.format_price(pred_res['tp'])}</code>\n"
+                    f"💰 <b>Rec. Size:</b> <code>{rec_size:.4f}</code> (1% Risk)\n"
+                    "━━━━━━━━━━━━━━━━━━\n"
                 )
 
                 news_text = ""
@@ -1064,18 +1064,18 @@ class AlgoTelegramBot:
                 f"<b>Status:</b> <code>{status}</code>",
                 f"<b>Direction:</b> {direction} | <b>Timeframe:</b> <code>{timeframe}</code>",
                 "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501",
-                f"<b>Entry:</b> <code>${entry:.4f}</code>",
+                f"<b>Entry:</b> <code>{config.format_price(entry)}</code>",
             ]
 
             if tp is not None:
-                lines.append(f"<b>Take Profit:</b> <code>${tp:.4f}</code>")
+                lines.append(f"<b>Take Profit:</b> <code>{config.format_price(tp)}</code>")
             if sl is not None:
-                lines.append(f"<b>Stop Loss:</b> <code>${sl:.4f}</code>")
+                lines.append(f"<b>Stop Loss:</b> <code>{config.format_price(sl)}</code>")
 
             if current is not None:
                 pnl_sign = "+" if pnl and pnl >= 0 else ""
                 pnl_str = f"{pnl_sign}{pnl:.2f}%" if pnl is not None else "N/A"
-                lines.append(f"<b>Current Price:</b> <code>${current:.4f}</code>")
+                lines.append(f"<b>Current Price:</b> <code>{config.format_price(current)}</code>")
                 lines.append(f"<b>PnL:</b> <code>{pnl_str}</code>")
             else:
                 lines.append("<b>Current Price:</b> N/A")

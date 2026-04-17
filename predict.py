@@ -381,7 +381,7 @@ def _rr(entry: float, sl: float, tp: float) -> str:
 
 
 def _fmt(price: float) -> str:
-    return f"{price:.5f}" if price < 10 else f"{price:,.2f}"
+    return config.format_price(price)
 
 
 def print_prediction(result):

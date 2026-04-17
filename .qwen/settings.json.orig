@@ -3,6 +3,5 @@
     "allow": [
       "Bash(uv *)"
     ]
-  },
-  "$version": 3
+  }
 }
