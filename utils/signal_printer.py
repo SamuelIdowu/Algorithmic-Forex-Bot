@@ -21,6 +21,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+import utils.config as config
+
 # ANSI colour codes (degrade gracefully if terminal doesn't support them)
 _RESET  = "\033[0m"
 _BOLD   = "\033[1m"
@@ -98,10 +100,7 @@ def _rr(entry: float, sl: float, tp: float) -> str:
 
 
 def _fmt_price(price: float) -> str:
-    """Auto-format price: 5 decimal places for forex, 2 for everything else."""
-    if price < 10:
-        return f"{price:.5f}"
-    return f"{price:,.2f}"
+    return config.format_price(price)
 
 
 def _notional(entry: float, size: float) -> str:

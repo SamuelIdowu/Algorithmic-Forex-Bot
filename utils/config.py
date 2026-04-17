@@ -186,3 +186,32 @@ def write_config(updates: dict[str, str]) -> None:
     with open(env_path, "w") as f:
         f.writelines(new_lines)
     return True
+
+def format_price(price: float) -> str:
+    """
+    Robust price formatter that adjusts precision based on magnitude.
+    Ensures enough significant figures for both high-priced (BTC) and 
+    low-priced (Forex, SHIB) assets.
+    """
+    if price is None:
+        return "—"
+    
+    if price == 0:
+        return "0.00"
+
+    # Handle various price magnitudes with appropriate precision
+    if price < 0.0001:
+        return f"{price:.8f}"
+    elif price < 0.01:
+        return f"{price:.6f}"
+    elif price < 1.0:
+        return f"{price:.5f}"
+    elif price < 100:
+        # Most Forex (except JPY) and low stocks
+        return f"{price:.5f}"
+    elif price < 10000:
+        # Stocks, JPY pairs, Gold
+        return f"{price:.3f}"
+    else:
+        # High priced assets (BTC, Indices)
+        return f"{price:,.2f}"
